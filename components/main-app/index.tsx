@@ -43,7 +43,6 @@ import { useEntryEvents } from "./hooks/useEntryEvents";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { addRecentDatabase } from "@/lib/storage";
 
 interface MainAppProps {
   onClose: (isManualLogout?: boolean) => void;
@@ -92,7 +91,6 @@ export function MainApp({ onClose }: MainAppProps) {
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [liveUpdatesEnabled, setLiveUpdatesEnabled] = useState(false);
   const [isSearchVisible, setIsSearchVisible] = useState(false);
-  const [selectedEntryForCopy, setSelectedEntryForCopy] = useState<EntryData | null>(null);
   const [passwordsVisible, setPasswordsVisible] = useState(false);
   const [showCreateDatabaseDialog, setShowCreateDatabaseDialog] = useState(false);
   const { toast } = useToast();
@@ -256,32 +254,6 @@ export function MainApp({ onClose }: MainAppProps) {
     setShowConflictDialog(false);
   }, []);
 
-  const handleCopyPassword = useCallback(async () => {
-    if (!selectedEntryForCopy) {
-      toast({
-        title: "No Entry Selected",
-        description: "Please select an entry first",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      await writeText(selectedEntryForCopy.password);
-      toast({
-        title: "Copied",
-        description: "Password copied to clipboard",
-        variant: "success",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: "Failed to copy password",
-        variant: "destructive",
-      });
-    }
-  }, [selectedEntryForCopy, toast]);
-
   const handleNewDatabase = useCallback(() => {
     if (isDirty) {
       toast({
@@ -294,9 +266,11 @@ export function MainApp({ onClose }: MainAppProps) {
     setShowCreateDatabaseDialog(true);
   }, [isDirty, toast]);
 
-  const handleNewDatabaseSuccess = useCallback(async () => {
-    await performClose(false);
-    window.location.reload();
+  const handleNewDatabaseSuccess = useCallback(async (openedInNewInstance: boolean) => {
+    if (!openedInNewInstance) {
+      await performClose(false);
+      window.location.reload();
+    }
   }, [performClose]);
 
   const handleTogglePasswords = useCallback(() => {
@@ -798,7 +772,6 @@ export function MainApp({ onClose }: MainAppProps) {
           onToggleSearch={() => setIsSearchVisible(!isSearchVisible)}
           onUndo={handleUndo}
           onRedo={handleRedo}
-          onCopy={handleCopyPassword}
           onNewDatabase={handleNewDatabase}
           onTogglePasswords={handleTogglePasswords}
           onAbout={handleAbout}
@@ -911,6 +884,7 @@ export function MainApp({ onClose }: MainAppProps) {
           isOpen={showCreateDatabaseDialog}
           onClose={() => setShowCreateDatabaseDialog(false)}
           onSuccess={handleNewDatabaseSuccess}
+          hasOpenDatabase={rootGroup !== null}
         />
       </div>
 
