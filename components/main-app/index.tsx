@@ -282,15 +282,6 @@ export function MainApp({ onClose }: MainAppProps) {
     }
   }, [selectedEntryForCopy, toast]);
 
-  const handlePaste = useCallback(() => {
-    toast({
-      title: "Paste",
-      description: "Paste functionality is context-dependent",
-      variant: "default",
-    });
-  }, [toast]);
-
-
   const handleNewDatabase = useCallback(() => {
     if (isDirty) {
       toast({
@@ -808,7 +799,6 @@ export function MainApp({ onClose }: MainAppProps) {
           onUndo={handleUndo}
           onRedo={handleRedo}
           onCopy={handleCopyPassword}
-          onPaste={handlePaste}
           onNewDatabase={handleNewDatabase}
           onTogglePasswords={handleTogglePasswords}
           onAbout={handleAbout}
