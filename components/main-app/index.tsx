@@ -43,7 +43,6 @@ import { useEntryEvents } from "./hooks/useEntryEvents";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { addRecentDatabase } from "@/lib/storage";
 
 interface MainAppProps {
   onClose: (isManualLogout?: boolean) => void;
@@ -92,7 +91,6 @@ export function MainApp({ onClose }: MainAppProps) {
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [liveUpdatesEnabled, setLiveUpdatesEnabled] = useState(false);
   const [isSearchVisible, setIsSearchVisible] = useState(false);
-  const [selectedEntryForCopy, setSelectedEntryForCopy] = useState<EntryData | null>(null);
   const [passwordsVisible, setPasswordsVisible] = useState(false);
   const [showCreateDatabaseDialog, setShowCreateDatabaseDialog] = useState(false);
   const { toast } = useToast();

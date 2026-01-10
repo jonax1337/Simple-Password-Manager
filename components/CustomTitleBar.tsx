@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X, Copy, Save, LogOut, Undo2, Redo2, Clipboard, ClipboardPaste, FolderOpen, Database as DatabaseIcon, Eye, EyeOff, Info, ExternalLink, FileText } from "lucide-react";
+import { Minus, Square, X, Save, LogOut, Undo2, Redo2, FolderOpen, Database as DatabaseIcon, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Settings } from "@/components/animate-ui/icons/settings";
 import { Search } from "@/components/animate-ui/icons/search";
