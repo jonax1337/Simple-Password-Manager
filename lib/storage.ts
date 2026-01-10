@@ -55,6 +55,10 @@ export function getRecentDatabases(): string[] {
  * Validates all recent database paths and returns only valid ones.
  * This function checks if each path exists and is a valid KDBX file.
  * Invalid paths are automatically removed from localStorage.
+ * 
+ * Note: Validates paths concurrently for better performance. Since the recent 
+ * databases list is limited to 10 items (see addRecentDatabase), this should 
+ * not cause file system issues.
  */
 export async function getValidatedRecentDatabases(): Promise<string[]> {
   const recent = getRecentDatabases();
@@ -62,7 +66,7 @@ export async function getValidatedRecentDatabases(): Promise<string[]> {
     return [];
   }
 
-  // Validate each path
+  // Validate each path concurrently (limited to 10 max by addRecentDatabase)
   const validationResults = await Promise.all(
     recent.map(async (path) => {
       try {

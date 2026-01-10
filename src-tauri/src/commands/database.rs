@@ -206,28 +206,31 @@ pub fn validate_database_file(path: String) -> Result<bool, String> {
         return Ok(false);
     }
     
-    // Try to read the file header to validate it's a KDBX file
+    // Try to read just the file header to validate it's a KDBX file
     // We don't actually open it (which would require a password),
     // just check if it has the KDBX magic bytes
-    match std::fs::read(&path_buf) {
-        Ok(bytes) => {
-            // KDBX files start with the magic signature: 0x03D9A29A (KeePass 2.x)
-            // Followed by version bytes
-            if bytes.len() < 8 {
-                return Ok(false);
-            }
-            
-            // Check for KDBX magic signature (first 4 bytes)
-            // Primary signature: 0x03, 0xD9, 0xA2, 0x9A
-            // Secondary signature follows, but checking primary is sufficient
-            if bytes[0] == 0x03 && bytes[1] == 0xD9 && bytes[2] == 0xA2 && bytes[3] == 0x9A {
-                Ok(true)
-            } else {
-                Ok(false)
+    use std::io::Read;
+    match std::fs::File::open(&path_buf) {
+        Ok(mut file) => {
+            let mut header = [0u8; 8];
+            match file.read_exact(&mut header) {
+                Ok(_) => {
+                    // KDBX files start with the magic signature: 0x03D9A29A (KeePass 2.x)
+                    // Primary signature: 0x03, 0xD9, 0xA2, 0x9A
+                    if header[0] == 0x03 && header[1] == 0xD9 && header[2] == 0xA2 && header[3] == 0x9A {
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                }
+                Err(_) => {
+                    // File is too short to be a valid KDBX file
+                    Ok(false)
+                }
             }
         }
         Err(_) => {
-            // File exists but can't be read (permissions issue, etc.)
+            // File exists but can't be opened (permissions issue, etc.)
             Ok(false)
         }
     }
