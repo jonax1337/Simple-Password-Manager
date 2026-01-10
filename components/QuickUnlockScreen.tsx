@@ -10,6 +10,7 @@ import { openDatabase } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
 import { KdfWarningDialog } from "@/components/KdfWarningDialog";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
+import { addRecentDatabase } from "@/lib/storage";
 import { invoke } from "@tauri-apps/api/core";
 
 interface QuickUnlockScreenProps {
@@ -42,6 +43,7 @@ export function QuickUnlockScreen({
     setLoading(true);
     try {
       const [rootGroup, dbPath] = await openDatabase(lastDatabasePath, password);
+      addRecentDatabase(lastDatabasePath);
       
       // Check if KDF warning was dismissed for this database
       const dismissedDbs = JSON.parse(localStorage.getItem("kdf_warning_dismissed_dbs") || "[]");

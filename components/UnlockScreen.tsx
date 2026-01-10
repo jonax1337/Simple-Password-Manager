@@ -12,7 +12,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { CreateDatabaseDialog } from "@/components/CreateDatabaseDialog";
 import { KdfWarningDialog } from "@/components/KdfWarningDialog";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
-import { saveLastDatabasePath } from "@/lib/storage";
+import { saveLastDatabasePath, addRecentDatabase } from "@/lib/storage";
 import { invoke } from "@tauri-apps/api/core";
 import Image from "next/image";
 
@@ -75,6 +75,7 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
     try {
       const [rootGroup, dbPath] = await openDatabase(filePath, password);
       saveLastDatabasePath(filePath);
+      addRecentDatabase(filePath);
       
       // Check if KDF warning was dismissed for this database
       const dismissedDbs = JSON.parse(localStorage.getItem("kdf_warning_dismissed_dbs") || "[]");

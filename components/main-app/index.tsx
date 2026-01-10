@@ -8,7 +8,7 @@ import { EntryList } from "@/components/entry-list";
 import { UnsavedChangesDialog } from "@/components/UnsavedChangesDialog";
 import { DatabaseConflictDialog } from "@/components/DatabaseConflictDialog";
 import { Dashboard } from "@/components/Dashboard";
-import { openEntryWindow, requestCloseAllChildWindows } from "@/lib/window";
+import { openEntryWindow, requestCloseAllChildWindows, openAboutWindow } from "@/lib/window";
 import { useToast } from "@/components/ui/use-toast";
 import type { GroupData, EntryData } from "@/lib/tauri";
 import { loadGroupTreeState } from "@/lib/group-state";
@@ -30,16 +30,19 @@ import {
 } from "@dnd-kit/core";
 import { getIconComponent } from "@/components/IconPicker";
 import { moveGroup } from "@/lib/tauri";
-import { findGroupByUuid, isDescendant } from "@/components/group-tree/utils";
+import { findGroupByUuid, findParentGroup, isDescendant } from "@/components/group-tree/utils";
 
 import { CustomTitleBar } from "@/components/CustomTitleBar";
 import { SearchHeader } from "@/components/SearchHeader";
+import { CreateDatabaseDialog } from "@/components/CreateDatabaseDialog";
 import { useAutoLock } from "./hooks/useAutoLock";
 import { useWindowManagement } from "./hooks/useWindowManagement";
 import { useSearch } from "./hooks/useSearch";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useEntryEvents } from "./hooks/useEntryEvents";
+import { useUndoRedo } from "./hooks/useUndoRedo";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 interface MainAppProps {
   onClose: (isManualLogout?: boolean) => void;
@@ -88,7 +91,10 @@ export function MainApp({ onClose }: MainAppProps) {
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [liveUpdatesEnabled, setLiveUpdatesEnabled] = useState(false);
   const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [passwordsVisible, setPasswordsVisible] = useState(false);
+  const [showCreateDatabaseDialog, setShowCreateDatabaseDialog] = useState(false);
   const { toast } = useToast();
+  const { addToHistory, undo, redo, canUndo, canRedo } = useUndoRedo();
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -158,6 +164,14 @@ export function MainApp({ onClose }: MainAppProps) {
 
   // Custom hooks
   const { searchQuery, searchResults, isSearching, searchScope, setSearchScope, handleSearch, clearSearch, refreshSearch, setIsSearching } = useSearch();
+  
+  // Set global addToHistory for components that need it (e.g., EntryListItem favorite toggle)
+  useEffect(() => {
+    (window as any).__addToHistory = addToHistory;
+    return () => {
+      delete (window as any).__addToHistory;
+    };
+  }, [addToHistory]);
   
   useAutoLock(performClose);
   
@@ -240,16 +254,73 @@ export function MainApp({ onClose }: MainAppProps) {
     setShowConflictDialog(false);
   }, []);
 
-  useKeyboardShortcuts({ 
-    onSave: handleSave,
-    onToggleSearch: () => setIsSearchVisible(true),
-    onCloseSearch: () => {
-      setIsSearchVisible(false);
-      clearSearch();
-    },
-    isSearchVisible
-  });
-  useEntryEvents(handleRefresh);
+  const handleNewDatabase = useCallback(() => {
+    if (isDirty) {
+      toast({
+        title: "Unsaved Changes",
+        description: "Please save or discard changes before creating a new database",
+        variant: "destructive",
+      });
+      return;
+    }
+    setShowCreateDatabaseDialog(true);
+  }, [isDirty, toast]);
+
+  const handleNewDatabaseSuccess = useCallback(async (openedInNewInstance: boolean) => {
+    if (!openedInNewInstance) {
+      await performClose(false);
+      window.location.reload();
+    }
+  }, [performClose]);
+
+  const handleTogglePasswords = useCallback(() => {
+    setPasswordsVisible(prev => !prev);
+    toast({
+      title: passwordsVisible ? "Passwords Hidden" : "Passwords Visible",
+      description: passwordsVisible ? "Password columns are now hidden" : "Password columns are now visible",
+      variant: "default",
+    });
+  }, [passwordsVisible, toast]);
+
+  const handleUndo = useCallback(async () => {
+    try {
+      await undo();
+      handleRefresh();
+      toast({
+        title: "Undo",
+        description: "Action undone",
+        variant: "success",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: "Failed to undo action",
+        variant: "destructive",
+      });
+    }
+  }, [undo, handleRefresh, toast]);
+
+  const handleRedo = useCallback(async () => {
+    try {
+      await redo();
+      handleRefresh();
+      toast({
+        title: "Redo",
+        description: "Action redone",
+        variant: "success",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: "Failed to redo action",
+        variant: "destructive",
+      });
+    }
+  }, [redo, handleRefresh, toast]);
+
+  const handleAbout = useCallback(() => {
+    openAboutWindow();
+  }, []);
 
   // Listen for HIBP setting changes from Settings window
   useEffect(() => {
@@ -362,6 +433,29 @@ export function MainApp({ onClose }: MainAppProps) {
       await performClose(true);
     }
   };
+
+  // Keyboard shortcuts and entry events - must be after all handlers are defined
+  useKeyboardShortcuts({ 
+    onSave: handleSave,
+    onClose: handleClose,
+    onNewDatabase: handleNewDatabase,
+    onToggleSearch: () => {
+      if (isSearchVisible) {
+        setIsSearchVisible(false);
+        clearSearch();
+      } else {
+        setIsSearchVisible(true);
+      }
+    },
+    onCloseSearch: () => {
+      setIsSearchVisible(false);
+      clearSearch();
+    },
+    onUndo: handleUndo,
+    onRedo: handleRedo,
+    isSearchVisible
+  });
+  useEntryEvents(handleRefresh);
 
   const handleUnsavedCancel = () => {
     setShowUnsavedDialog(false);
@@ -519,13 +613,29 @@ export function MainApp({ onClose }: MainAppProps) {
       }
 
       try {
+        const oldGroupUuid = entry.group_uuid;
         await moveEntry(entry.uuid, targetId);
+        
+        // Track for undo/redo
+        addToHistory(
+          `Move entry "${entry.title}" to group`,
+          async () => {
+            await moveEntry(entry.uuid, oldGroupUuid);
+            await handleRefresh();
+          },
+          async () => {
+            await moveEntry(entry.uuid, targetId);
+            await handleRefresh();
+          }
+        );
+        
+        setIsDirty(true);
+        await handleRefresh();
         toast({
           title: "Success",
           description: `Moved "${entry.title}" to "${targetGroup.name}"`,
           variant: "success",
         });
-        handleRefresh();
       } catch (error: any) {
         toast({
           title: "Error",
@@ -554,13 +664,34 @@ export function MainApp({ onClose }: MainAppProps) {
           return;
         }
 
+        const oldParent = findParentGroup(rootGroup, draggedId);
+        const oldParentUuid = oldParent?.uuid || rootGroup.uuid;
+        
         await moveGroup(draggedId, targetId);
+        
+        // Track for undo/redo
+        const movedGroup = findGroupByUuid(rootGroup, draggedId);
+        if (movedGroup) {
+          addToHistory(
+            `Move group "${movedGroup.name}"`,
+            async () => {
+              await moveGroup(draggedId, oldParentUuid);
+              await handleRefresh();
+            },
+            async () => {
+              await moveGroup(draggedId, targetId);
+              await handleRefresh();
+            }
+          );
+        }
+        
+        setIsDirty(true);
+        await handleRefresh();
         toast({
           title: "Success",
           description: `Moved "${draggedGroup.name}" into "${targetGroup.name}"`,
           variant: "success",
         });
-        handleRefresh();
       } catch (error: any) {
         toast({
           title: "Error",
@@ -639,6 +770,14 @@ export function MainApp({ onClose }: MainAppProps) {
           onSave={handleSave}
           onLogout={handleClose}
           onToggleSearch={() => setIsSearchVisible(!isSearchVisible)}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          onNewDatabase={handleNewDatabase}
+          onTogglePasswords={handleTogglePasswords}
+          onAbout={handleAbout}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          passwordsVisible={passwordsVisible}
         />
         
         <SearchHeader
@@ -680,6 +819,7 @@ export function MainApp({ onClose }: MainAppProps) {
                 activeId={dndActiveId}
                 overId={dndOverId}
                 activeType={dndActiveType}
+                addToHistory={addToHistory}
               />
             )}
           </ResizablePanel>
@@ -719,6 +859,7 @@ export function MainApp({ onClose }: MainAppProps) {
                     : undefined
                 }
                 databasePath={dbPath}
+                addToHistory={addToHistory}
               />
             )}
           </div>
@@ -737,6 +878,13 @@ export function MainApp({ onClose }: MainAppProps) {
           onSynchronize={handleSynchronize}
           onOverwrite={handleOverwrite}
           onCancel={handleConflictCancel}
+        />
+
+        <CreateDatabaseDialog
+          isOpen={showCreateDatabaseDialog}
+          onClose={() => setShowCreateDatabaseDialog(false)}
+          onSuccess={handleNewDatabaseSuccess}
+          hasOpenDatabase={rootGroup !== null}
         />
       </div>
 

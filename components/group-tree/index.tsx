@@ -19,7 +19,7 @@ import { saveGroupTreeState } from "@/lib/group-state";
 
 import { DraggableFolder } from "./DraggableFolder";
 import { CreateGroupDialog, RenameGroupDialog } from "./GroupDialogs";
-import { findGroupByUuid, isDescendant } from "./utils";
+import { findGroupByUuid, findGroupByName } from "./utils";
 import type { GroupTreeProps } from "./types";
 
 export function GroupTree({
@@ -33,6 +33,7 @@ export function GroupTree({
   activeId,
   overId,
   activeType,
+  addToHistory,
 }: GroupTreeProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     initialExpandedGroups || new Set([group.uuid])
@@ -66,7 +67,33 @@ export function GroupTree({
     if (!newGroupName.trim()) return;
 
     try {
-      await createGroup(newGroupName, parentUuid, newGroupIconId);
+      // Generate UUID for tracking
+      const groupUuid = crypto.randomUUID();
+      const groupName = newGroupName;
+      const groupIconId = newGroupIconId;
+      const groupParentUuid = parentUuid;
+      
+      await createGroup(groupName, groupParentUuid, groupIconId);
+      
+      // Track for undo/redo - note: we can't get the exact UUID from createGroup, so undo might be limited
+      if (addToHistory) {
+        addToHistory(
+          `Create group "${groupName}"`,
+          async () => {
+            // Undo: find and delete the created group by name
+            const groupToDelete = findGroupByName(group, groupName, groupParentUuid);
+            if (groupToDelete) {
+              await deleteGroup(groupToDelete.uuid);
+              onRefresh();
+            }
+          },
+          async () => {
+            await createGroup(groupName, groupParentUuid, groupIconId);
+            onRefresh();
+          }
+        );
+      }
+      
       toast({ title: "Success", description: "Group created successfully", variant: "success" });
       setNewGroupName("");
       setNewGroupIconId(48);
@@ -85,7 +112,30 @@ export function GroupTree({
     if (!renameGroupName.trim()) return;
 
     try {
-      await renameGroup(renameGroupUuid, renameGroupName, renameGroupIconId);
+      const groupUuid = renameGroupUuid;
+      const oldGroup = findGroupByUuid(group, groupUuid);
+      const oldName = oldGroup?.name || "";
+      const oldIconId = oldGroup?.icon_id ?? 48;
+      const newName = renameGroupName;
+      const newIconId = renameGroupIconId;
+      
+      await renameGroup(groupUuid, newName, newIconId);
+      
+      // Track for undo/redo
+      if (addToHistory) {
+        addToHistory(
+          `Rename group "${oldName}" to "${newName}"`,
+          async () => {
+            await renameGroup(groupUuid, oldName, oldIconId);
+            onRefresh();
+          },
+          async () => {
+            await renameGroup(groupUuid, newName, newIconId);
+            onRefresh();
+          }
+        );
+      }
+      
       toast({ title: "Success", description: "Group renamed successfully", variant: "success" });
       setShowRenameDialog(false);
       setRenameGroupName("");
@@ -105,13 +155,15 @@ export function GroupTree({
     const groupName = groupToDelete?.name || "this group";
     
     const shouldDelete = await ask(
-      `Are you sure you want to delete "${groupName}" and all its contents?`,
+      `Are you sure you want to delete "${groupName}" and all its contents?\n\nThis action cannot be undone.`,
       { kind: "warning", title: "Delete Group" }
     );
     
     if (!shouldDelete) return;
 
     try {
+      // Note: We can't truly undo group deletion as it would need to recreate all entries
+      // This is a destructive operation that shouldn't be undoable
       await deleteGroup(uuid);
       toast({ title: "Success", description: "Group deleted successfully", variant: "success" });
       if (onGroupDeleted) onGroupDeleted(uuid);

@@ -12,6 +12,7 @@ export interface GroupTreeProps {
   activeId?: string | null;
   overId?: string | null;
   activeType?: 'folder' | 'entry' | null;
+  addToHistory?: (action: string, undo: () => Promise<void>, redo: () => Promise<void>) => void;
 }
 
 export interface DraggableFolderProps {

@@ -57,7 +57,9 @@
             "fs:allow-read-dir",
             "clipboard-manager:allow-write-text",
             "clipboard-manager:allow-clear",
-            "shell:allow-open"
+            "shell:allow-open",
+            "shell:allow-spawn",
+            "shell:allow-execute"
           ]
         },
         {
@@ -88,6 +90,20 @@
             "core:window:allow-start-dragging",
             "core:event:allow-emit",
             "dialog:allow-ask"
+          ]
+        },
+        {
+          "identifier": "about-capability",
+          "windows": ["about"],
+          "permissions": [
+            "core:default",
+            "core:window:allow-close",
+            "core:window:allow-destroy",
+            "core:window:allow-minimize",
+            "core:window:allow-is-maximized",
+            "core:window:allow-start-dragging",
+            "core:event:allow-listen",
+            "shell:allow-open"
           ]
         }
       ]

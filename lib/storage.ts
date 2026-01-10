@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import { validateDatabaseFile } from "./tauri";
 
 const LAST_DATABASE_KEY = "lastDatabasePath";
+const RECENT_DATABASES_KEY = "recentDatabases";
 const COLUMN_CONFIG_PREFIX = "columnConfig_";
 const COLUMN_WIDTHS_PREFIX = "columnWidths_";
 const HIBP_ENABLED_KEY = "hibpEnabled";
@@ -23,6 +25,82 @@ export function getLastDatabasePath(): string | null {
 export function clearLastDatabasePath(): void {
   if (typeof window !== "undefined") {
     localStorage.removeItem(LAST_DATABASE_KEY);
+  }
+}
+
+export function addRecentDatabase(path: string): void {
+  if (typeof window !== "undefined") {
+    const recent = getRecentDatabases();
+    const filtered = recent.filter(p => p !== path);
+    const updated = [path, ...filtered].slice(0, 10);
+    localStorage.setItem(RECENT_DATABASES_KEY, JSON.stringify(updated));
+  }
+}
+
+export function getRecentDatabases(): string[] {
+  if (typeof window !== "undefined") {
+    const stored = localStorage.getItem(RECENT_DATABASES_KEY);
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return [];
+      }
+    }
+  }
+  return [];
+}
+
+/**
+ * Validates all recent database paths and returns only valid ones.
+ * This function checks if each path exists and is a valid KDBX file.
+ * Invalid paths are automatically removed from localStorage.
+ * 
+ * Note: Validates paths concurrently for better performance. Since the recent 
+ * databases list is limited to 10 items (see addRecentDatabase), this should 
+ * not cause file system issues.
+ */
+export async function getValidatedRecentDatabases(): Promise<string[]> {
+  const recent = getRecentDatabases();
+  if (recent.length === 0) {
+    return [];
+  }
+
+  // Validate each path concurrently (limited to 10 max by addRecentDatabase)
+  // Note: File system operations are fast (checking existence + reading 8 bytes),
+  // and Tauri invoke calls have built-in timeouts, so explicit timeout handling
+  // is not necessary here.
+  const validationResults = await Promise.all(
+    recent.map(async (path) => {
+      try {
+        const isValid = await validateDatabaseFile(path);
+        return { path, isValid };
+      } catch (error) {
+        // If validation fails (e.g., file system error), consider it invalid
+        console.warn(`Failed to validate database path: ${path}`, error);
+        return { path, isValid: false };
+      }
+    })
+  );
+
+  // Filter to only valid paths
+  const validPaths = validationResults
+    .filter(result => result.isValid)
+    .map(result => result.path);
+
+  // If some paths were invalid, update localStorage to remove them
+  if (validPaths.length !== recent.length && typeof window !== "undefined") {
+    localStorage.setItem(RECENT_DATABASES_KEY, JSON.stringify(validPaths));
+  }
+
+  return validPaths;
+}
+
+export function clearRecentDatabase(path: string): void {
+  if (typeof window !== "undefined") {
+    const recent = getRecentDatabases();
+    const filtered = recent.filter(p => p !== path);
+    localStorage.setItem(RECENT_DATABASES_KEY, JSON.stringify(filtered));
   }
 }
 

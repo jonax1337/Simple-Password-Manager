@@ -40,6 +40,7 @@ export function EntryList({
   rootGroupUuid,
   selectedGroupName,
   databasePath,
+  addToHistory,
 }: EntryListProps) {
   const [entries, setEntries] = useState<EntryData[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -197,6 +198,22 @@ export function EntryList({
 
       await createEntry(newEntry);
       
+      // Track for undo/redo
+      if (addToHistory) {
+        const entryDataCapture = { ...newEntry };
+        addToHistory(
+          `Create entry "${newEntry.title}"`,
+          async () => {
+            await deleteEntry(entryDataCapture.uuid);
+            onRefresh();
+          },
+          async () => {
+            await createEntry(entryDataCapture);
+            onRefresh();
+          }
+        );
+      }
+      
       toast({
         title: "Success",
         description: isFavoritesView 
@@ -268,7 +285,26 @@ export function EntryList({
     if (!shouldDelete) return;
 
     try {
+      // Capture full entry data before deletion
+      const entryDataCapture = { ...entry };
+      
       await deleteEntry(entry.uuid);
+      
+      // Track for undo/redo
+      if (addToHistory) {
+        addToHistory(
+          `Delete entry "${entryDataCapture.title}"`,
+          async () => {
+            await createEntry(entryDataCapture);
+            onRefresh();
+          },
+          async () => {
+            await deleteEntry(entryDataCapture.uuid);
+            onRefresh();
+          }
+        );
+      }
+      
       toast({
         title: "Success",
         description: "Entry deleted successfully",

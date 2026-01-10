@@ -38,6 +38,7 @@ export interface EntryListProps {
   rootGroupUuid?: string;
   selectedGroupName?: string;
   databasePath?: string;
+  addToHistory?: (action: string, undo: () => Promise<void>, redo: () => Promise<void>) => void;
 }
 
 export type { EntryData };

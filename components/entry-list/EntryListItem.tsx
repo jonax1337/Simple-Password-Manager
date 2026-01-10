@@ -28,6 +28,7 @@ interface EntryListItemProps {
   onContextMenuChange: (open: boolean) => void;
   onCopyField: (text: string, fieldName: string) => void;
   onOpenUrl: (url: string) => void;
+  addToHistory?: (action: string, undo: () => Promise<void>, redo: () => Promise<void>) => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onRefresh: () => void;
@@ -67,13 +68,38 @@ export function EntryListItem({
   const handleToggleFavorite = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      await updateEntry({
+      const wasFavorite = entry.is_favorite;
+      const updatedEntry = {
         ...entry,
-        is_favorite: !entry.is_favorite,
-      });
+        is_favorite: !wasFavorite,
+      };
+      
+      await updateEntry(updatedEntry);
+      
+      // Track for undo/redo
+      if (onRefresh) {
+        const entryUuid = entry.uuid;
+        const originalState = wasFavorite;
+        const newState = !wasFavorite;
+        
+        if ((window as any).__addToHistory) {
+          (window as any).__addToHistory(
+            `${newState ? 'Add' : 'Remove'} "${entry.title}" ${newState ? 'to' : 'from'} favorites`,
+            async () => {
+              await updateEntry({ ...entry, is_favorite: originalState });
+              onRefresh();
+            },
+            async () => {
+              await updateEntry({ ...entry, is_favorite: newState });
+              onRefresh();
+            }
+          );
+        }
+      }
+      
       onRefresh();
       toast({
-        title: entry.is_favorite ? "Removed from favorites" : "Added to favorites",
+        title: wasFavorite ? "Removed from favorites" : "Added to favorites",
         variant: "success",
       });
     } catch (error: any) {

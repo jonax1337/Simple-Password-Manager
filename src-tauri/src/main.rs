@@ -34,6 +34,8 @@ fn main() {
             commands::database::upgrade_kdf_parameters,
             commands::database::check_database_changes,
             commands::database::merge_database,
+            commands::database::open_database_in_new_instance,
+            commands::database::validate_database_file,
             commands::database::get_groups,
             commands::entry::get_entries,
             commands::entry::get_favorite_entries,

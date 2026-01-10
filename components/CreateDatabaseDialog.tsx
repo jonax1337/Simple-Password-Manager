@@ -13,22 +13,24 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FolderOpen } from "lucide-react";
-import { createDatabase } from "@/lib/tauri";
+import { createDatabase, openDatabaseInNewInstance } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
 import { open } from "@tauri-apps/plugin-dialog";
-import { saveLastDatabasePath } from "@/lib/storage";
+import { saveLastDatabasePath, addRecentDatabase } from "@/lib/storage";
 import { PasswordStrengthMeter } from "@/components/PasswordStrengthMeter";
 
 interface CreateDatabaseDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (openedInNewInstance: boolean) => void;
+  hasOpenDatabase?: boolean;
 }
 
 export function CreateDatabaseDialog({
   isOpen,
   onClose,
   onSuccess,
+  hasOpenDatabase = false,
 }: CreateDatabaseDialogProps) {
   const [folderPath, setFolderPath] = useState("");
   const [fileName, setFileName] = useState("");
@@ -92,20 +94,32 @@ export function CreateDatabaseDialog({
       const fullPath = `${folderPath}\\${fileNameWithExt}`;
 
       await createDatabase(fullPath, password);
-      saveLastDatabasePath(fullPath);
+      addRecentDatabase(fullPath);
       
-      toast({
-        title: "Success",
-        description: "Database created successfully",
-        variant: "success",
-      });
+      if (hasOpenDatabase) {
+        // Open in new instance if a database is already open
+        await openDatabaseInNewInstance(fullPath);
+        toast({
+          title: "Success",
+          description: "Database created and opened in new window",
+          variant: "success",
+        });
+        onSuccess(true);
+      } else {
+        // Open in current instance
+        saveLastDatabasePath(fullPath);
+        toast({
+          title: "Success",
+          description: "Database created successfully",
+          variant: "success",
+        });
+        onSuccess(false);
+      }
       
       setFolderPath("");
       setFileName("");
       setPassword("");
       setConfirmPassword("");
-      
-      onSuccess();
       onClose();
     } catch (error: any) {
       toast({

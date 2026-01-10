@@ -2,7 +2,7 @@ import { WebviewWindow, getAllWebviewWindows } from "@tauri-apps/api/webviewWind
 import type { EntryData } from "@/lib/tauri";
 
 // Labels for child windows that should be closed when main app closes/logs out
-const CHILD_WINDOW_PREFIXES = ['entry-', 'settings'];
+const CHILD_WINDOW_PREFIXES = ['entry-', 'settings', 'about'];
 
 /**
  * Check if there are any open child windows (entry editors, settings)
@@ -169,6 +169,46 @@ export async function openSettingsWindow() {
     });
   } catch (error) {
     console.error("Failed to open settings window:", error);
+    throw error;
+  }
+}
+
+export async function openAboutWindow() {
+  try {
+    const windowLabel = "about";
+    
+    // Check if window already exists
+    const existingWindow = await WebviewWindow.getByLabel(windowLabel);
+    if (existingWindow) {
+      await existingWindow.setFocus();
+      return;
+    }
+
+    const isDev = process.env.NODE_ENV === 'development';
+    const baseUrl = isDev ? 'http://localhost:3000' : window.location.origin;
+    
+    const webview = new WebviewWindow(windowLabel, {
+      url: `${baseUrl}/about`,
+      title: "About",
+      width: 600,
+      height: 700,
+      resizable: false,
+      maximizable: false,
+      decorations: false,
+      center: true,
+    });
+
+    console.log('Creating about window');
+    
+    webview.once("tauri://created", () => {
+      console.log("About window created successfully");
+    });
+
+    webview.once("tauri://error", (e) => {
+      console.error("Error creating about window:", e);
+    });
+  } catch (error) {
+    console.error("Failed to open about window:", error);
     throw error;
   }
 }
