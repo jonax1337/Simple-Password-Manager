@@ -254,41 +254,6 @@ export function MainApp({ onClose }: MainAppProps) {
     setShowConflictDialog(false);
   }, []);
 
-  const handleCopyPassword = useCallback(async () => {
-    if (!selectedEntryForCopy) {
-      toast({
-        title: "No Entry Selected",
-        description: "Please select an entry first",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      await writeText(selectedEntryForCopy.password);
-      toast({
-        title: "Copied",
-        description: "Password copied to clipboard",
-        variant: "success",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: "Failed to copy password",
-        variant: "destructive",
-      });
-    }
-  }, [selectedEntryForCopy, toast]);
-
-  const handlePaste = useCallback(() => {
-    toast({
-      title: "Paste",
-      description: "Paste functionality is context-dependent",
-      variant: "default",
-    });
-  }, [toast]);
-
-
   const handleNewDatabase = useCallback(() => {
     if (isDirty) {
       toast({
@@ -807,8 +772,6 @@ export function MainApp({ onClose }: MainAppProps) {
           onToggleSearch={() => setIsSearchVisible(!isSearchVisible)}
           onUndo={handleUndo}
           onRedo={handleRedo}
-          onCopy={handleCopyPassword}
-          onPaste={handlePaste}
           onNewDatabase={handleNewDatabase}
           onTogglePasswords={handleTogglePasswords}
           onAbout={handleAbout}
