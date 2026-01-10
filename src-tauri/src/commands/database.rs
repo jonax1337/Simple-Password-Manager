@@ -1,8 +1,10 @@
 use crate::kdbx::{Database, GroupData, KdfInfo};
 use crate::state::AppState;
+use std::io::Read;
 use std::path::PathBuf;
 use tauri::State;
 use std::process::Command;
+use std::fs::File;
 
 #[tauri::command]
 pub fn get_initial_file_path(state: State<AppState>) -> Option<String> {
@@ -134,6 +136,50 @@ pub fn open_database_in_new_instance(db_path: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to spawn new instance: {}", e))?;
     
     Ok(())
+}
+
+#[tauri::command]
+pub fn validate_database_file(path: String) -> Result<bool, String> {
+    let path_buf = PathBuf::from(&path);
+    
+    // Check if file exists
+    if !path_buf.exists() {
+        return Ok(false);
+    }
+    
+    // Check if it's a file (not a directory)
+    if !path_buf.is_file() {
+        return Ok(false);
+    }
+    
+    // Check .kdbx extension
+    if let Some(ext) = path_buf.extension() {
+        if ext.to_string_lossy().to_lowercase() != "kdbx" {
+            return Ok(false);
+        }
+    } else {
+        return Ok(false);
+    }
+    
+    // Validate KDBX magic bytes (0x03D9A29A)
+    // KDBX format starts with these 4 bytes after the base signature
+    let mut file = File::open(&path_buf)
+        .map_err(|_| "Failed to open file for validation".to_string())?;
+    
+    let mut magic_bytes = [0u8; 8];
+    if file.read_exact(&mut magic_bytes).is_err() {
+        // File is too small to be a valid KDBX file
+        return Ok(false);
+    }
+    
+    // Check for KDBX signature: first 4 bytes should be 0x03, 0xD9, 0xA2, 0x9A
+    // followed by version bytes
+    let valid = magic_bytes[0] == 0x03 
+        && magic_bytes[1] == 0xD9 
+        && magic_bytes[2] == 0xA2 
+        && magic_bytes[3] == 0x9A;
+    
+    Ok(valid)
 }
 
 #[tauri::command]
