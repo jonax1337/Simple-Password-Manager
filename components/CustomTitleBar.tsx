@@ -139,6 +139,7 @@ export function CustomTitleBar({
           src="/app-icon.png" 
           alt="App Icon" 
           className="h-4 w-4 ml-1"
+          data-tauri-drag-region
         />
         {showMenu && (
           <>
@@ -173,7 +174,7 @@ export function CustomTitleBar({
                         >
                           <DatabaseIcon className="h-4 w-4" />
                           <span className="truncate max-w-[200px]" title={dbPath}>
-                            {dbPath.split('/').pop() || dbPath.split('\\').pop() || dbPath}
+                            {dbPath.split(/[/\\]/).pop() || dbPath}
                           </span>
                         </DropdownMenuItem>
                       ))
@@ -277,13 +278,13 @@ export function CustomTitleBar({
 
       {/* Center: Title */}
       <div className="absolute left-1/2 -translate-x-1/2 flex items-center" data-tauri-drag-region>
-        <span className="text-xs font-semibold text-foreground truncate max-w-md">
+        <span className="text-xs font-semibold text-foreground truncate max-w-md" data-tauri-drag-region>
           {title}
         </span>
       </div>
 
       {/* Right: Optional Search + Settings + Window Controls */}
-      <div className="flex items-center gap-1 h-full z-10">
+      <div className="flex items-center gap-1 h-full z-10" data-tauri-drag-region>
         {showMenu && onToggleSearch && (
           <Button
             variant="ghost"
@@ -312,7 +313,7 @@ export function CustomTitleBar({
           </Button>
         )}
 
-        {showMenu && <div className="h-5 w-px bg-border mx-1" />}
+        {showMenu && <div className="h-5 w-px bg-border mx-1" data-tauri-drag-region />}
 
         <button
           onClick={handleMinimize}

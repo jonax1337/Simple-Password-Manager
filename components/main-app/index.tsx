@@ -474,7 +474,14 @@ export function MainApp({ onClose }: MainAppProps) {
     onSave: handleSave,
     onClose: handleClose,
     onNewDatabase: handleNewDatabase,
-    onToggleSearch: () => setIsSearchVisible(true),
+    onToggleSearch: () => {
+      if (isSearchVisible) {
+        setIsSearchVisible(false);
+        clearSearch();
+      } else {
+        setIsSearchVisible(true);
+      }
+    },
     onCloseSearch: () => {
       setIsSearchVisible(false);
       clearSearch();
