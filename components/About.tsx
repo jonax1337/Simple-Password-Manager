@@ -46,7 +46,7 @@ export function About() {
             <Button
               variant="outline"
               className="w-full justify-center gap-2"
-              onClick={() => open('https://github.com/jonax1337/Password-Manager')}
+              onClick={() => open('https://github.com/jonax1337/Simple-Password-Manager')}
             >
               <Github className="h-4 w-4" />
               View on GitHub
