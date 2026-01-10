@@ -184,3 +184,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 export async function checkBreachedPasswords(): Promise<BreachedEntry[]> {
   return await invoke<BreachedEntry[]>("check_breached_passwords");
 }
+
+export async function openDatabaseInNewInstance(dbPath: string): Promise<void> {
+  return await invoke<void>("open_database_in_new_instance", { dbPath });
+}

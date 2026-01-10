@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { openSettingsWindow } from "@/lib/window";
 import { getRecentDatabases } from "@/lib/storage";
-import { open } from "@tauri-apps/plugin-shell";
+import { openDatabaseInNewInstance } from "@/lib/tauri";
 
 interface CustomTitleBarProps {
   title?: string;
@@ -68,11 +68,9 @@ export function CustomTitleBar({
     setRecentDatabases(getRecentDatabases());
   }, []);
 
-  const openDatabaseInNewInstance = async (dbPath: string) => {
+  const handleOpenDatabase = async (dbPath: string) => {
     try {
-      // Open the database file with the system's default handler
-      // Since .kdbx files are associated with this app, the OS will open a new instance
-      await open(dbPath);
+      await openDatabaseInNewInstance(dbPath);
     } catch (error) {
       console.error('Failed to open database in new instance:', error);
       alert(`Could not open database: ${error}`);
@@ -169,7 +167,7 @@ export function CustomTitleBar({
                       recentDatabases.map((dbPath) => (
                         <DropdownMenuItem
                           key={dbPath}
-                          onClick={() => openDatabaseInNewInstance(dbPath)}
+                          onClick={() => handleOpenDatabase(dbPath)}
                           className="gap-2 cursor-pointer"
                         >
                           <DatabaseIcon className="h-4 w-4" />

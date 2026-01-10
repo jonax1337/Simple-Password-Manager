@@ -2,6 +2,7 @@ use crate::kdbx::{Database, GroupData, KdfInfo};
 use crate::state::AppState;
 use std::path::PathBuf;
 use tauri::State;
+use std::process::Command;
 
 #[tauri::command]
 pub fn get_initial_file_path(state: State<AppState>) -> Option<String> {
@@ -120,6 +121,19 @@ pub fn check_database_changes(state: State<AppState>) -> Result<bool, String> {
     } else {
         Err("No database loaded".to_string())
     }
+}
+
+#[tauri::command]
+pub fn open_database_in_new_instance(db_path: String) -> Result<(), String> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+    
+    Command::new(current_exe)
+        .arg(&db_path)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn new instance: {}", e))?;
+    
+    Ok(())
 }
 
 #[tauri::command]
