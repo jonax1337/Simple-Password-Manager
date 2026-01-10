@@ -67,6 +67,9 @@ export async function getValidatedRecentDatabases(): Promise<string[]> {
   }
 
   // Validate each path concurrently (limited to 10 max by addRecentDatabase)
+  // Note: File system operations are fast (checking existence + reading 8 bytes),
+  // and Tauri invoke calls have built-in timeouts, so explicit timeout handling
+  // is not necessary here.
   const validationResults = await Promise.all(
     recent.map(async (path) => {
       try {

@@ -1,5 +1,6 @@
 use crate::kdbx::{Database, GroupData, KdfInfo};
 use crate::state::AppState;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tauri::State;
 use std::process::Command;
@@ -209,7 +210,6 @@ pub fn validate_database_file(path: String) -> Result<bool, String> {
     // Try to read just the file header to validate it's a KDBX file
     // We don't actually open it (which would require a password),
     // just check if it has the KDBX magic bytes
-    use std::io::Read;
     match std::fs::File::open(&path_buf) {
         Ok(mut file) => {
             let mut header = [0u8; 8];
