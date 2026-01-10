@@ -31,7 +31,6 @@ interface CustomTitleBarProps {
   onUndo?: () => void;
   onRedo?: () => void;
   onCopy?: () => void;
-  onPaste?: () => void;
   onNewDatabase?: () => void;
   onTogglePasswords?: () => void;
   onAbout?: () => void;
@@ -51,7 +50,6 @@ export function CustomTitleBar({
   onUndo,
   onRedo,
   onCopy,
-  onPaste,
   onNewDatabase,
   onTogglePasswords,
   onAbout,
