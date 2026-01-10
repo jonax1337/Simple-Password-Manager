@@ -19,7 +19,7 @@ import { saveGroupTreeState } from "@/lib/group-state";
 
 import { DraggableFolder } from "./DraggableFolder";
 import { CreateGroupDialog, RenameGroupDialog } from "./GroupDialogs";
-import { findGroupByUuid, findGroupByName, isDescendant } from "./utils";
+import { findGroupByUuid, findGroupByName } from "./utils";
 import type { GroupTreeProps } from "./types";
 
 export function GroupTree({
