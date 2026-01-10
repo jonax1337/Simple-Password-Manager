@@ -91,7 +91,6 @@ export function MainApp({ onClose }: MainAppProps) {
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [liveUpdatesEnabled, setLiveUpdatesEnabled] = useState(false);
   const [isSearchVisible, setIsSearchVisible] = useState(false);
-  const [selectedEntryForCopy, setSelectedEntryForCopy] = useState<EntryData | null>(null);
   const [passwordsVisible, setPasswordsVisible] = useState(false);
   const [showCreateDatabaseDialog, setShowCreateDatabaseDialog] = useState(false);
   const { toast } = useToast();
