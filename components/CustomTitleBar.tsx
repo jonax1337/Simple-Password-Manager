@@ -17,7 +17,7 @@ import {
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu";
 import { openSettingsWindow } from "@/lib/window";
-import { getRecentDatabases } from "@/lib/storage";
+import { getValidatedRecentDatabases } from "@/lib/storage";
 import { openDatabaseInNewInstance } from "@/lib/tauri";
 
 interface CustomTitleBarProps {
@@ -63,7 +63,12 @@ export function CustomTitleBar({
   const [recentDatabases, setRecentDatabases] = useState<string[]>([]);
 
   useEffect(() => {
-    setRecentDatabases(getRecentDatabases());
+    // Load and validate recent databases on mount
+    const loadRecentDatabases = async () => {
+      const validated = await getValidatedRecentDatabases();
+      setRecentDatabases(validated);
+    };
+    loadRecentDatabases();
   }, []);
 
   const handleOpenDatabase = async (dbPath: string) => {

@@ -188,3 +188,7 @@ export async function checkBreachedPasswords(): Promise<BreachedEntry[]> {
 export async function openDatabaseInNewInstance(dbPath: string): Promise<void> {
   return await invoke<void>("open_database_in_new_instance", { dbPath });
 }
+
+export async function validateDatabaseFile(path: string): Promise<boolean> {
+  return await invoke<boolean>("validate_database_file", { path });
+}

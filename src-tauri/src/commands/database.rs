@@ -1,6 +1,6 @@
 use crate::kdbx::{Database, GroupData, KdfInfo};
 use crate::state::AppState;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::State;
 use std::process::Command;
 
@@ -179,5 +179,56 @@ pub fn get_groups(state: State<AppState>) -> Result<GroupData, String> {
         Ok(db.get_root_group())
     } else {
         Err("No database loaded".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn validate_database_file(path: String) -> Result<bool, String> {
+    let path_buf = PathBuf::from(&path);
+    
+    // Check if file exists
+    if !path_buf.exists() {
+        return Ok(false);
+    }
+    
+    // Check if it's a file (not a directory)
+    if !path_buf.is_file() {
+        return Ok(false);
+    }
+    
+    // Check file extension
+    if let Some(ext) = path_buf.extension() {
+        let ext_str = ext.to_string_lossy().to_lowercase();
+        if ext_str != "kdbx" {
+            return Ok(false);
+        }
+    } else {
+        return Ok(false);
+    }
+    
+    // Try to read the file header to validate it's a KDBX file
+    // We don't actually open it (which would require a password),
+    // just check if it has the KDBX magic bytes
+    match std::fs::read(&path_buf) {
+        Ok(bytes) => {
+            // KDBX files start with the magic signature: 0x03D9A29A (KeePass 2.x)
+            // Followed by version bytes
+            if bytes.len() < 8 {
+                return Ok(false);
+            }
+            
+            // Check for KDBX magic signature (first 4 bytes)
+            // Primary signature: 0x03, 0xD9, 0xA2, 0x9A
+            // Secondary signature follows, but checking primary is sufficient
+            if bytes[0] == 0x03 && bytes[1] == 0xD9 && bytes[2] == 0xA2 && bytes[3] == 0x9A {
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        Err(_) => {
+            // File exists but can't be read (permissions issue, etc.)
+            Ok(false)
+        }
     }
 }
