@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Github, ExternalLink, Heart } from "lucide-react";
+import { Github, Heart } from "lucide-react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
 import { open } from "@tauri-apps/plugin-shell";
