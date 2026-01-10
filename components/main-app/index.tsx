@@ -43,7 +43,6 @@ import { useEntryEvents } from "./hooks/useEntryEvents";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { addRecentDatabase } from "@/lib/storage";
 
 interface MainAppProps {
   onClose: (isManualLogout?: boolean) => void;
