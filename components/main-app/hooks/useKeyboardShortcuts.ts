@@ -21,8 +21,8 @@ export function useKeyboardShortcuts({ onSave, onToggleSearch, onCloseSearch, on
         e.preventDefault();
         onSave();
       }
-      // Ctrl/Cmd+W: Close Database
-      if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+      // Ctrl/Cmd+Alt+W: Close Database
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key === 'w') {
         e.preventDefault();
         onClose?.();
       }
