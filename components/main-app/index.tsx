@@ -303,9 +303,11 @@ export function MainApp({ onClose }: MainAppProps) {
     setShowCreateDatabaseDialog(true);
   }, [isDirty, toast]);
 
-  const handleNewDatabaseSuccess = useCallback(async () => {
-    await performClose(false);
-    window.location.reload();
+  const handleNewDatabaseSuccess = useCallback(async (openedInNewInstance: boolean) => {
+    if (!openedInNewInstance) {
+      await performClose(false);
+      window.location.reload();
+    }
   }, [performClose]);
 
   const handleTogglePasswords = useCallback(() => {
@@ -921,6 +923,7 @@ export function MainApp({ onClose }: MainAppProps) {
           isOpen={showCreateDatabaseDialog}
           onClose={() => setShowCreateDatabaseDialog(false)}
           onSuccess={handleNewDatabaseSuccess}
+          hasOpenDatabase={rootGroup !== null}
         />
       </div>
 
