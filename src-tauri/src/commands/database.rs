@@ -1,4 +1,5 @@
 use crate::kdbx::{Database, GroupData, KdfInfo};
+use crate::mutex_utils::safe_lock;
 use crate::state::AppState;
 use std::io::Read;
 use std::path::PathBuf;
@@ -8,22 +9,13 @@ use std::fs::File;
 
 #[tauri::command]
 pub fn get_initial_file_path(state: State<AppState>) -> Option<String> {
-    let initial_path = state.initial_file_path.lock()
-        .map_err(|e| {
-            eprintln!("get_initial_file_path: Lock poisoned: {}", e);
-            e
-        })
-        .ok()?;
+    let initial_path = safe_lock(&state.initial_file_path, "get_initial_file_path").ok()?;
     initial_path.clone()
 }
 
 #[tauri::command]
 pub fn clear_initial_file_path(state: State<AppState>) -> Result<(), String> {
-    let mut initial_path = state.initial_file_path.lock()
-        .map_err(|e| {
-            eprintln!("clear_initial_file_path: Lock poisoned: {}", e);
-            "Failed to access state".to_string()
-        })?;
+    let mut initial_path = safe_lock(&state.initial_file_path, "clear_initial_file_path")?;
     *initial_path = None;
     Ok(())
 }
@@ -38,11 +30,7 @@ pub fn create_database(
 
     let root_group = db.get_root_group();
 
-    let mut database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("create_database: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let mut database_lock = safe_lock(&state.database, "create_database")?;
     *database_lock = Some(db);
 
     Ok(root_group)
@@ -59,11 +47,7 @@ pub fn open_database(
 
     let root_group = db.get_root_group();
 
-    let mut database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("open_database: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let mut database_lock = safe_lock(&state.database, "open_database")?;
     *database_lock = Some(db);
 
     Ok((root_group, path))
@@ -71,11 +55,7 @@ pub fn open_database(
 
 #[tauri::command]
 pub fn save_database(state: State<AppState>) -> Result<(), String> {
-    let mut database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("save_database: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let mut database_lock = safe_lock(&state.database, "save_database")?;
 
     if let Some(db) = database_lock.as_mut() {
         db.save().map_err(|e| e.to_string())?;
@@ -87,22 +67,14 @@ pub fn save_database(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn close_database(state: State<AppState>) -> Result<(), String> {
-    let mut database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("close_database: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let mut database_lock = safe_lock(&state.database, "close_database")?;
     *database_lock = None;
     Ok(())
 }
 
 #[tauri::command]
 pub fn get_kdf_info(state: State<AppState>) -> Result<KdfInfo, String> {
-    let database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("get_kdf_info: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let database_lock = safe_lock(&state.database, "get_kdf_info")?;
     if let Some(db) = database_lock.as_ref() {
         Ok(db.get_kdf_info())
     } else {
@@ -112,11 +84,7 @@ pub fn get_kdf_info(state: State<AppState>) -> Result<KdfInfo, String> {
 
 #[tauri::command]
 pub fn check_database_changes(state: State<AppState>) -> Result<bool, String> {
-    let database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("check_database_changes: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let database_lock = safe_lock(&state.database, "check_database_changes")?;
 
     if let Some(db) = database_lock.as_ref() {
         db.check_for_changes().map_err(|e| e.to_string())
@@ -184,11 +152,7 @@ pub fn validate_database_file(path: String) -> Result<bool, String> {
 
 #[tauri::command]
 pub fn merge_database(state: State<AppState>) -> Result<(), String> {
-    let mut database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("merge_database: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let mut database_lock = safe_lock(&state.database, "merge_database")?;
 
     if let Some(db) = database_lock.as_mut() {
         db.merge_database().map_err(|e| e.to_string())?;
@@ -200,11 +164,7 @@ pub fn merge_database(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn upgrade_kdf_parameters(state: State<AppState>) -> Result<(), String> {
-    let mut database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("upgrade_kdf_parameters: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let mut database_lock = safe_lock(&state.database, "upgrade_kdf_parameters")?;
     if let Some(db) = database_lock.as_mut() {
         db.upgrade_kdf_parameters().map_err(|e| e.to_string())?;
         Ok(())
@@ -215,11 +175,7 @@ pub fn upgrade_kdf_parameters(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_groups(state: State<AppState>) -> Result<GroupData, String> {
-    let database_lock = state.database.lock()
-        .map_err(|e| {
-            eprintln!("get_groups: Lock poisoned: {}", e);
-            "Failed to access database state".to_string()
-        })?;
+    let database_lock = safe_lock(&state.database, "get_groups")?;
 
     if let Some(db) = database_lock.as_ref() {
         Ok(db.get_root_group())

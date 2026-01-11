@@ -8,6 +8,13 @@ export function useClipboard() {
   const [clearTimeoutId, setClearTimeoutId] = useState<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
 
+  // Get clipboard clear time from localStorage (default: 30 seconds)
+  const getClipboardClearTime = (): number => {
+    if (typeof window === "undefined") return 30;
+    const saved = localStorage.getItem("clipboardClearSeconds");
+    return saved ? parseInt(saved, 10) : 30;
+  };
+
   const handleCopyField = async (text: string, fieldName: string) => {
     if (!text) {
       toast({
@@ -26,13 +33,15 @@ export function useClipboard() {
         clearTimeout(clearTimeoutId);
       }
 
+      const clearSeconds = getClipboardClearTime();
+      
       toast({
         title: "Copied",
-        description: `${fieldName} copied to clipboard - will clear in 30s`,
+        description: `${fieldName} copied to clipboard - will clear in ${clearSeconds}s`,
         variant: "info",
       });
 
-      // Auto-clear after 30 seconds
+      // Auto-clear after configured seconds
       const timeoutId = setTimeout(async () => {
         await writeText("");
         toast({
@@ -40,7 +49,7 @@ export function useClipboard() {
           description: "Clipboard has been cleared for security",
           variant: "default",
         });
-      }, 30000);
+      }, clearSeconds * 1000);
 
       setClearTimeoutId(timeoutId);
     } catch (error: any) {

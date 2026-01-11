@@ -4,6 +4,7 @@
 mod kdbx;
 mod commands;
 mod state;
+mod mutex_utils;
 
 use state::AppState;
 use std::sync::Mutex;

@@ -53,6 +53,12 @@ export function Settings() {
     }
     return false;
   });
+  const [clipboardClearSeconds, setClipboardClearSeconds] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("clipboardClearSeconds") || "30";
+    }
+    return "30";
+  });
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -68,9 +74,19 @@ export function Settings() {
     // Only allow numbers
     const numericValue = value.replace(/[^0-9]/g, '');
     setAutoLockSeconds(numericValue);
-    localStorage.setItem("autoLockSeconds", numericValue);
+    if (numericValue && typeof window !== "undefined") {
+      localStorage.setItem("autoLockSeconds", numericValue);
+    }
     // Dispatch custom event to notify main app of setting change
     window.dispatchEvent(new Event('autoLockChanged'));
+  };
+
+  const handleClipboardClearChange = (value: string) => {
+    const numericValue = value.replace(/[^0-9]/g, '');
+    setClipboardClearSeconds(numericValue);
+    if (numericValue && typeof window !== "undefined") {
+      localStorage.setItem("clipboardClearSeconds", numericValue);
+    }
   };
 
   const handleCloseToTrayChange = (checked: boolean) => {
@@ -223,6 +239,32 @@ export function Settings() {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Set to 0 to disable auto-lock
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Timer className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-sm font-medium">Clipboard Clear Timer</CardTitle>
+                  </div>
+                  <CardDescription>Auto-clear clipboard after copying</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      value={clipboardClearSeconds}
+                      onChange={(e) => handleClipboardClearChange(e.target.value)}
+                      className="w-24 text-center"
+                      placeholder="30"
+                    />
+                    <span className="text-sm text-muted-foreground">seconds</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Clipboard will auto-clear after copying password/username (recommended: 30)
                   </p>
                 </CardContent>
               </Card>

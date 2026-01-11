@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use crate::mutex_utils::safe_lock;
 use sha1::{Sha1, Digest};
 use tauri::State;
 
@@ -20,11 +21,7 @@ pub async fn check_breached_passwords(state: State<'_, AppState>) -> Result<Vec<
     
     // Extract all entries while holding the lock, then release it
     let all_entries = {
-        let database_lock = state.database.lock()
-            .map_err(|e| {
-                eprintln!("check_breached_passwords: Lock poisoned: {}", e);
-                "Failed to access database state".to_string()
-            })?;
+        let database_lock = safe_lock(&state.database, "check_breached_passwords")?;
         
         if let Some(db) = database_lock.as_ref() {
             db.get_all_entries()
@@ -179,13 +176,9 @@ pub fn save_dismissed_breach(state: State<AppState>, db_path: String, entry_uuid
     }
     
     // Acquire lock with error handling
-    let mut dismissed_map = state.dismissed_breaches.lock()
-        .map_err(|e| {
-            eprintln!("save_dismissed_breach: Failed to acquire lock: {}", e);
-            "Failed to access storage".to_string()
-        })?;
+    let mut dismissed = safe_lock(&state.dismissed_breaches, "save_dismissed_breach")?;
     
-    dismissed_map
+    dismissed
         .entry(db_path.clone())
         .or_insert_with(HashSet::new)
         .insert(entry_uuid.clone());
@@ -202,13 +195,9 @@ pub fn get_dismissed_breaches(state: State<AppState>, db_path: String) -> Result
     }
     
     // Acquire lock with error handling
-    let dismissed_map = state.dismissed_breaches.lock()
-        .map_err(|e| {
-            eprintln!("get_dismissed_breaches: Failed to acquire lock: {}", e);
-            "Failed to access storage".to_string()
-        })?;
+    let dismissed = safe_lock(&state.dismissed_breaches, "get_dismissed_breaches")?;
     
-    if let Some(dismissed_set) = dismissed_map.get(&db_path) {
+    if let Some(dismissed_set) = dismissed.get(&db_path) {
         Ok(dismissed_set.iter().cloned().collect())
     } else {
         Ok(Vec::new())
@@ -228,13 +217,9 @@ pub fn clear_dismissed_breach(state: State<AppState>, db_path: String, entry_uui
     }
     
     // Acquire lock with error handling
-    let mut dismissed_map = state.dismissed_breaches.lock()
-        .map_err(|e| {
-            eprintln!("clear_dismissed_breach: Failed to acquire lock: {}", e);
-            "Failed to access storage".to_string()
-        })?;
+    let mut dismissed = safe_lock(&state.dismissed_breaches, "clear_dismissed_breach")?;
     
-    if let Some(dismissed_set) = dismissed_map.get_mut(&db_path) {
+    if let Some(dismissed_set) = dismissed.get_mut(&db_path) {
         dismissed_set.remove(&entry_uuid);
     }
     
