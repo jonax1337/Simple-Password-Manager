@@ -1,5 +1,10 @@
 use chrono::NaiveDateTime;
-use keepass::db::{Entry, Group, Node, Value, Times, History};
+use keepass::{db::{Entry, Group, Node, Value, Times, History}, Database as KeepassDatabase};
+
+#[cfg(test)]
+#[path = "entry_tests.rs"]
+mod entry_tests;
+
 use uuid::Uuid;
 
 use super::database::Database;

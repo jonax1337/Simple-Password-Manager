@@ -3,6 +3,10 @@ use crate::mutex_utils::safe_lock;
 use sha1::{Sha1, Digest};
 use tauri::State;
 
+#[cfg(test)]
+#[path = "security_tests.rs"]
+mod security_tests;
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct BreachedEntry {
     pub uuid: String,

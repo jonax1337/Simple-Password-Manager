@@ -1,10 +1,10 @@
-mod database;
-mod entry;
-mod error;
-mod group;
-mod search;
-mod stats;
-mod types;
+pub mod database;
+pub mod entry;
+pub mod error;
+pub mod group;
+pub mod search;
+pub mod stats;
+pub mod types;
 
 pub use database::Database;
 pub use types::{DashboardStats, EntryData, GroupData, KdfInfo};

@@ -8,9 +8,14 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use std::collections::HashMap;
+use thiserror::Error;
 
 use super::error::DatabaseError;
 use super::types::KdfInfo;
+
+#[cfg(test)]
+#[path = "database_tests.rs"]
+mod database_tests;
 
 pub struct Database {
     pub db: KeepassDatabase,
