@@ -2,16 +2,17 @@
 
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { logger } from "@/lib/logger";
 
 export function useEntryEvents(onRefresh: () => void) {
   useEffect(() => {
     const unlistenUpdated = listen('entry-updated', () => {
-      console.log('Entry updated in child window, refreshing...');
+      logger.debug('Entry updated in child window, refreshing', { category: "Entry" });
       onRefresh();
     });
 
     const unlistenDeleted = listen('entry-deleted', () => {
-      console.log('Entry deleted in child window, refreshing...');
+      logger.debug('Entry deleted in child window, refreshing', { category: "Entry" });
       onRefresh();
     });
 

@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { getLastDatabasePath, clearLastDatabasePath } from "@/lib/storage";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { logger } from "@/lib/logger";
 
 export default function Home() {
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -23,7 +24,7 @@ export default function Home() {
       const initialFilePath = await invoke<string | null>("get_initial_file_path");
       
       if (initialFilePath) {
-        console.log("App opened via file association:", initialFilePath);
+        logger.info("App opened via file association", { category: "App", data: initialFilePath });
         setFilePathFromAssociation(initialFilePath);
         setShowQuickUnlock(false);
       } else {

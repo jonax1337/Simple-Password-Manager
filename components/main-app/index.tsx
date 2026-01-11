@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
+import { UndoRedoProvider } from "@/contexts/UndoRedoContext";
 import { saveDatabase, closeDatabase, getGroups, getFavoriteEntries, moveEntry, checkDatabaseChanges, mergeDatabase } from "@/lib/tauri";
 import { GroupTree } from "@/components/group-tree";
 import { EntryList } from "@/components/entry-list";
@@ -43,6 +44,7 @@ import { useEntryEvents } from "./hooks/useEntryEvents";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { logger } from "@/lib/logger";
 
 interface MainAppProps {
   onClose: (isManualLogout?: boolean) => void;
@@ -164,14 +166,6 @@ export function MainApp({ onClose }: MainAppProps) {
 
   // Custom hooks
   const { searchQuery, searchResults, isSearching, searchScope, setSearchScope, handleSearch, clearSearch, refreshSearch, setIsSearching } = useSearch();
-  
-  // Set global addToHistory for components that need it (e.g., EntryListItem favorite toggle)
-  useEffect(() => {
-    (window as any).__addToHistory = addToHistory;
-    return () => {
-      delete (window as any).__addToHistory;
-    };
-  }, [addToHistory]);
   
   useAutoLock(performClose);
   
@@ -325,7 +319,7 @@ export function MainApp({ onClose }: MainAppProps) {
   // Listen for HIBP setting changes from Settings window
   useEffect(() => {
     const unlisten = listen('hibp-setting-changed', async () => {
-      console.log('HIBP setting changed, reloading database...');
+      logger.info('HIBP setting changed, reloading database', { category: "Database" });
       await performClose(false);
     });
 
@@ -385,7 +379,7 @@ export function MainApp({ onClose }: MainAppProps) {
             });
         }
       } catch (error) {
-        console.error('Failed to check for database changes:', error);
+        logger.error('Failed to check for database changes', { category: "Database", data: error });
       }
     }, 5000);
 
@@ -556,7 +550,7 @@ export function MainApp({ onClose }: MainAppProps) {
     const data = active.data.current;
     
     if (!isDragData(data)) {
-      console.warn('Invalid drag data structure:', data);
+      logger.warn('Invalid drag data structure', { category: "DnD", data });
       return;
     }
     
@@ -586,7 +580,7 @@ export function MainApp({ onClose }: MainAppProps) {
     if (!over || active.id === over.id) return;
     
     if (!isDragData(data)) {
-      console.warn('Invalid drag data structure:', data);
+      logger.warn('Invalid drag data structure', { category: "DnD", data });
       return;
     }
 
@@ -755,14 +749,15 @@ export function MainApp({ onClose }: MainAppProps) {
   };
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={customCollisionDetection}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="flex h-full w-full flex-col">
+    <UndoRedoProvider value={{ addToHistory, undo: handleUndo, redo: handleRedo, canUndo, canRedo }}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={customCollisionDetection}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex h-full w-full flex-col">
         <CustomTitleBar 
           title={windowTitle}
           showMenu={true}
@@ -907,6 +902,7 @@ export function MainApp({ onClose }: MainAppProps) {
           </div>
         ) : null}
       </DragOverlay>
-    </DndContext>
+      </DndContext>
+    </UndoRedoProvider>
   );
 }

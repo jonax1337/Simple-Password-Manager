@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { validateDatabaseFile } from "./tauri";
+import { logger } from "@/lib/logger";
 
 const LAST_DATABASE_KEY = "lastDatabasePath";
 const RECENT_DATABASES_KEY = "recentDatabases";
@@ -77,7 +78,7 @@ export async function getValidatedRecentDatabases(): Promise<string[]> {
         return { path, isValid };
       } catch (error) {
         // If validation fails (e.g., file system error), consider it invalid
-        console.warn(`Failed to validate database path: ${path}`, error);
+        logger.warn("Failed to validate database path", { category: "Storage", data: { path, error } });
         return { path, isValid: false };
       }
     })
@@ -186,25 +187,21 @@ export async function saveDismissedBreach(dbPath: string, entryUuid: string): Pr
   try {
     await invoke("save_dismissed_breach", { dbPath, entryUuid });
   } catch (error) {
-    // Log detailed error for debugging (only visible in dev console, not exposed to user)
-    console.error("[Storage] Failed to save dismissed breach", { error });
-    // Throw generic error without sensitive details
+    logger.error("Failed to save dismissed breach", { category: "Storage", data: error });
     throw new Error("Failed to save dismissed breach");
   }
 }
 
 export async function getDismissedBreaches(dbPath: string): Promise<string[]> {
   if (!dbPath) {
-    console.warn("[Storage] Database path missing, returning empty dismissed breaches array");
+    logger.warn("Database path missing, returning empty dismissed breaches array", { category: "Storage" });
     return [];
   }
   
   try {
     return await invoke<string[]>("get_dismissed_breaches", { dbPath });
   } catch (error) {
-    // Log detailed error for debugging without exposing sensitive data
-    console.error("[Storage] Failed to get dismissed breaches", { error });
-    // Return empty array as fallback to prevent UI breakage
+    logger.error("Failed to get dismissed breaches", { category: "Storage", data: error });
     return [];
   }
 }
@@ -220,9 +217,7 @@ export async function clearDismissedBreach(dbPath: string, entryUuid: string): P
   try {
     await invoke("clear_dismissed_breach", { dbPath, entryUuid });
   } catch (error) {
-    // Log detailed error for debugging (only visible in dev console, not exposed to user)
-    console.error("[Storage] Failed to clear dismissed breach", { error });
-    // Throw generic error without sensitive details
+    logger.error("Failed to clear dismissed breach", { category: "Storage", data: error });
     throw new Error("Failed to clear dismissed breach");
   }
 }
@@ -265,8 +260,7 @@ export function getSearchScope(dbPath: string): SearchScope {
     }
     if (stored !== null) {
       // Invalid value in localStorage; reset to safe default
-      // Avoid logging sensitive data such as full paths or database contents
-      console.warn("Invalid search scope value in localStorage, resetting to 'global'.");
+      logger.warn("Invalid search scope value in localStorage, resetting to 'global'", { category: "Storage" });
     }
   }
   return 'global';

@@ -25,31 +25,38 @@ import { getHibpEnabled, setHibpEnabled, getLiveUpdates, setLiveUpdates } from "
 
 export function Settings() {
   const { theme, setTheme } = useTheme();
-  const [autoLockSeconds, setAutoLockSeconds] = useState<string>("0");
-  const [closeToTray, setCloseToTray] = useState<boolean>(false);
-  const [hibpEnabled, setHibpEnabledState] = useState<boolean>(false);
-  const [liveUpdatesEnabled, setLiveUpdatesEnabled] = useState<boolean>(false);
+  
+  // Load initial values from localStorage
+  const [autoLockSeconds, setAutoLockSeconds] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("autoLockSeconds") || "300";
+    }
+    return "300";
+  });
+  const [closeToTray, setCloseToTray] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("closeToTray") === "true";
+    }
+    return false;
+  });
+  const [hibpEnabled, setHibpEnabledState] = useState(() => getHibpEnabled());
+  const [currentDbPath, setCurrentDbPath] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("lastDatabasePath") || "";
+    }
+    return "";
+  });
+  const [liveUpdatesEnabled, setLiveUpdatesEnabled] = useState(() => {
+    if (typeof window !== "undefined") {
+      const dbPath = localStorage.getItem("lastDatabasePath");
+      return dbPath ? getLiveUpdates(dbPath) : false;
+    }
+    return false;
+  });
   const [mounted, setMounted] = useState(false);
-  const [currentDbPath, setCurrentDbPath] = useState<string>("");
 
   useEffect(() => {
     setMounted(true);
-    // Load auto-lock setting from localStorage
-    const saved = localStorage.getItem("autoLockSeconds");
-    if (saved) {
-      setAutoLockSeconds(saved);
-    }
-    // Load close to tray setting
-    const closeToTraySaved = localStorage.getItem("closeToTray");
-    setCloseToTray(closeToTraySaved === "true");
-    // Load HIBP setting
-    setHibpEnabledState(getHibpEnabled());
-    // Load current database path
-    const dbPath = localStorage.getItem("lastDatabasePath");
-    if (dbPath) {
-      setCurrentDbPath(dbPath);
-      setLiveUpdatesEnabled(getLiveUpdates(dbPath));
-    }
   }, []);
 
   const handleClose = async () => {

@@ -48,10 +48,9 @@ impl Database {
         let modified = entry.times.get_last_modification().map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
         let last_accessed = entry.times.get_last_access().map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
         // Format expiry without seconds for datetime-local compatibility
-        // Add 1 hour to compensate for keepass-rs timezone conversion when reading
+        // Keep as UTC - browser will handle local timezone conversion
         let expiry_time = entry.times.get_expiry().map(|t| {
-            let adjusted = *t + chrono::Duration::hours(1);
-            adjusted.format("%Y-%m-%dT%H:%M").to_string()
+            t.format("%Y-%m-%dT%H:%M").to_string()
         });
         
         // Standard fields to exclude from custom fields
@@ -181,13 +180,11 @@ impl Database {
         entry.times.expires = entry_data.expires;
         if entry_data.expires {
             if let Some(expiry_str) = entry_data.expiry_time {
-                if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M") {
-                    // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                    expiry -= chrono::Duration::hours(1);
+                if let Ok(expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M") {
+                    // Store as UTC - frontend sends local time as UTC
                     entry.times.set_expiry(expiry);
-                } else if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M:%S") {
-                    // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                    expiry -= chrono::Duration::hours(1);
+                } else if let Ok(expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M:%S") {
+                    // Store as UTC - frontend sends local time as UTC
                     entry.times.set_expiry(expiry);
                 }
             }
@@ -274,13 +271,11 @@ impl Database {
             // If expires is checked, we need to set an expiry time
             if let Some(expiry_str) = entry_data.expiry_time {
                 if !expiry_str.is_empty() {
-                    if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M") {
-                        // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                        expiry -= chrono::Duration::hours(1);
+                    if let Ok(expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M") {
+                        // Store as UTC - frontend sends local time as UTC
                         entry.times.set_expiry(expiry);
-                    } else if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M:%S") {
-                        // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                        expiry -= chrono::Duration::hours(1);
+                    } else if let Ok(expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M:%S") {
+                        // Store as UTC - frontend sends local time as UTC
                         entry.times.set_expiry(expiry);
                     }
                 }

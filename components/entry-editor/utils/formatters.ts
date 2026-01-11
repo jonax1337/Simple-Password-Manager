@@ -56,7 +56,7 @@ export const getExpiryDate = (preset: string): string => {
 export const getDefaultExpiryDate = (): string => {
   const oneYearFromNow = new Date();
   oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
-  // Use local time, not UTC (KeePass stores local time)
+  // datetime-local input works in local time, backend stores as naive datetime
   const year = oneYearFromNow.getFullYear();
   const month = String(oneYearFromNow.getMonth() + 1).padStart(2, '0');
   const day = String(oneYearFromNow.getDate()).padStart(2, '0');

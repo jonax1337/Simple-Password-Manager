@@ -240,7 +240,7 @@ export function EntryList({
     }
   };
 
-  const handleDuplicateEntry = async (entry: EntryData) => {
+  const handleDuplicateEntry = useCallback(async (entry: EntryData) => {
     try {
       const duplicatedEntry: EntryData = {
         ...entry,
@@ -274,9 +274,9 @@ export function EntryList({
         variant: "destructive",
       });
     }
-  };
+  }, [onRefresh, isSearching, onSearchRefresh, toast]);
 
-  const handleDeleteEntry = async (entry: EntryData) => {
+  const handleDeleteEntry = useCallback(async (entry: EntryData) => {
     const shouldDelete = await ask(
       `Are you sure you want to delete "${entry.title}" and all its data?`,
       { kind: "warning", title: "Delete Entry" }
@@ -318,7 +318,7 @@ export function EntryList({
         variant: "destructive",
       });
     }
-  };
+  }, [onRefresh, isSearching, onSearchRefresh, addToHistory, toast]);
 
   const handleBulkDelete = async () => {
     const count = selectionCount;
@@ -352,7 +352,7 @@ export function EntryList({
     }
   };
 
-  const handleOpenUrl = async (url: string) => {
+  const handleOpenUrl = useCallback(async (url: string) => {
     if (!url) return;
     
     try {
@@ -366,9 +366,9 @@ export function EntryList({
         variant: "destructive",
       });
     }
-  };
+  }, [toast]);
 
-  const formatTimestamp = (timestamp?: string) => {
+  const formatTimestamp = useCallback((timestamp?: string) => {
     if (!timestamp) return "—";
     try {
       const date = new Date(timestamp);
@@ -383,7 +383,7 @@ export function EntryList({
     } catch {
       return "—";
     }
-  };
+  }, []);
 
   // Determine whether to show context menu
   const shouldShowContextMenu = useMemo(() => {

@@ -1,13 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
+import { logger } from "@/lib/logger";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Image from "next/image";
 import { openDatabase } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
+import { motion } from "framer-motion";
 import { KdfWarningDialog } from "@/components/KdfWarningDialog";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
 import { addRecentDatabase } from "@/lib/storage";
@@ -67,7 +69,7 @@ export function QuickUnlockScreen({
             return; // Don't unlock yet, wait for user decision
           }
         } catch (error) {
-          console.error("Failed to check KDF info:", error);
+          logger.error("Failed to check KDF info", { category: "Security", data: error });
         }
       }
       

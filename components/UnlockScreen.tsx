@@ -8,7 +8,9 @@ import { Label } from "@/components/ui/label";
 import { FolderOpen, Plus } from "lucide-react";
 import { openDatabase } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
-import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getSearchScope, saveSearchScope, getLiveUpdates } from "@/lib/storage";
+import { logger } from "@/lib/logger";
 import { CreateDatabaseDialog } from "@/components/CreateDatabaseDialog";
 import { KdfWarningDialog } from "@/components/KdfWarningDialog";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
@@ -99,7 +101,7 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
             return; // Don't unlock yet, wait for user decision
           }
         } catch (error) {
-          console.error("Failed to check KDF info:", error);
+          logger.error("Failed to check KDF info", { category: "Security", data: error });
         }
       }
       

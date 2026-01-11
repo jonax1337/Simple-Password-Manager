@@ -1,5 +1,6 @@
 import { WebviewWindow, getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
 import type { EntryData } from "@/lib/tauri";
+import { logger } from "@/lib/logger";
 
 // Labels for child windows that should be closed when main app closes/logs out
 const CHILD_WINDOW_PREFIXES = ['entry-', 'settings', 'about'];
@@ -14,7 +15,7 @@ export async function hasOpenChildWindows(): Promise<boolean> {
       CHILD_WINDOW_PREFIXES.some(prefix => win.label.startsWith(prefix))
     );
   } catch (error) {
-    console.error("Failed to check child windows:", error);
+    logger.error("Failed to check child windows", { category: "Window", data: error });
     return false;
   }
 }
@@ -40,14 +41,14 @@ export async function requestCloseAllChildWindows(): Promise<boolean> {
     for (const win of childWindows) {
       try {
         await win.close();
-        console.log(`Requested close for child window: ${win.label}`);
+        logger.debug(`Requested close for child window: ${win.label}`, { category: "Window" });
       } catch (error) {
         // Ignore "window not found" errors - the window was already closed
         const errorMessage = typeof error === 'string' ? error : (error as Error)?.message || '';
         if (errorMessage.includes('window not found')) {
-          console.log(`Window ${win.label} was already closed`);
+          logger.debug(`Window ${win.label} was already closed`, { category: "Window" });
         } else {
-          console.error(`Failed to request close for window ${win.label}:`, error);
+          logger.error(`Failed to request close for window ${win.label}`, { category: "Window", data: error });
         }
       }
     }
@@ -59,7 +60,7 @@ export async function requestCloseAllChildWindows(): Promise<boolean> {
     const stillOpen = await hasOpenChildWindows();
     return !stillOpen;
   } catch (error) {
-    console.error("Failed to close child windows:", error);
+    logger.error("Failed to close child windows", { category: "Window", data: error });
     return false;
   }
 }
@@ -78,14 +79,14 @@ export async function forceCloseAllChildWindows(): Promise<void> {
       if (isChildWindow) {
         try {
           await win.destroy();
-          console.log(`Force closed child window: ${label}`);
+          logger.debug(`Force closed child window: ${label}`, { category: "Window" });
         } catch (error) {
-          console.error(`Failed to force close window ${label}:`, error);
+          logger.error(`Failed to force close window ${label}`, { category: "Window", data: error });
         }
       }
     }
   } catch (error) {
-    console.error("Failed to force close child windows:", error);
+    logger.error("Failed to force close child windows", { category: "Window", data: error });
   }
 }
 
@@ -117,18 +118,18 @@ export async function openEntryWindow(entry: EntryData, groupUuid: string) {
       center: true,
     });
 
-    console.log('Creating entry window:', windowLabel);
+    logger.debug('Creating entry window', { category: "Window", data: windowLabel });
     
     // Wait for window to be ready
     webview.once("tauri://created", () => {
-      console.log("Entry window created successfully");
+      logger.debug("Entry window created successfully", { category: "Window" });
     });
 
     webview.once("tauri://error", (e) => {
-      console.error("Error creating entry window:", e);
+      logger.error("Error creating entry window", { category: "Window", data: e });
     });
   } catch (error) {
-    console.error("Failed to open entry window:", error);
+    logger.error("Failed to open entry window", { category: "Window", data: error });
     throw error;
   }
 }
@@ -158,17 +159,17 @@ export async function openSettingsWindow() {
       center: true,
     });
 
-    console.log('Creating settings window');
+    logger.debug('Creating settings window', { category: "Window" });
     
     webview.once("tauri://created", () => {
-      console.log("Settings window created successfully");
+      logger.debug("Settings window created successfully", { category: "Window" });
     });
 
     webview.once("tauri://error", (e) => {
-      console.error("Error creating settings window:", e);
+      logger.error("Error creating settings window", { category: "Window", data: e });
     });
   } catch (error) {
-    console.error("Failed to open settings window:", error);
+    logger.error("Failed to open settings window", { category: "Window", data: error });
     throw error;
   }
 }
@@ -198,17 +199,17 @@ export async function openAboutWindow() {
       center: true,
     });
 
-    console.log('Creating about window');
+    logger.debug('Creating about window', { category: "Window" });
     
     webview.once("tauri://created", () => {
-      console.log("About window created successfully");
+      logger.debug("About window created successfully", { category: "Window" });
     });
 
     webview.once("tauri://error", (e) => {
-      console.error("Error creating about window:", e);
+      logger.error("Error creating about window", { category: "Window", data: e });
     });
   } catch (error) {
-    console.error("Failed to open about window:", error);
+    logger.error("Failed to open about window", { category: "Window", data: error });
     throw error;
   }
 }

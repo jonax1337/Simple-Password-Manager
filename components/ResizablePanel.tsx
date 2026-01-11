@@ -17,22 +17,21 @@ export function ResizablePanel({
   maxWidth = 500,
   storageKey,
 }: ResizablePanelProps) {
-  const [width, setWidth] = useState(defaultWidth);
-  const [isResizing, setIsResizing] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Load width from localStorage on mount
-  useEffect(() => {
+  // Load initial width from localStorage or use default
+  const [width, setWidth] = useState(() => {
     if (storageKey && typeof window !== "undefined") {
       const savedWidth = localStorage.getItem(storageKey);
       if (savedWidth) {
         const parsedWidth = parseInt(savedWidth, 10);
         if (!isNaN(parsedWidth)) {
-          setWidth(Math.max(minWidth, Math.min(maxWidth, parsedWidth)));
+          return Math.max(minWidth, Math.min(maxWidth, parsedWidth));
         }
       }
     }
-  }, [storageKey, minWidth, maxWidth]);
+    return defaultWidth;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Save width to localStorage when it changes
   useEffect(() => {

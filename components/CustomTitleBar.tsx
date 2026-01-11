@@ -19,6 +19,7 @@ import {
 import { openSettingsWindow } from "@/lib/window";
 import { getValidatedRecentDatabases } from "@/lib/storage";
 import { openDatabaseInNewInstance } from "@/lib/tauri";
+import { logger } from "@/lib/logger";
 
 interface CustomTitleBarProps {
   title?: string;
@@ -75,7 +76,7 @@ export function CustomTitleBar({
     try {
       await openDatabaseInNewInstance(dbPath);
     } catch (error) {
-      console.error('Failed to open database in new instance:', error);
+      logger.error('Failed to open database in new instance', { category: "Database", data: error });
       alert(`Could not open database: ${error}`);
     }
   };

@@ -9,6 +9,8 @@ import {
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
 import { Edit, User, Key, Trash2, ExternalLink, Star, GripVertical, Copy } from "lucide-react";
+import { useState, useCallback } from "react";
+import { useUndoRedoContext } from "@/contexts/UndoRedoContext";
 import { DynamicIcon } from "@/components/IconPicker";
 import { updateEntry } from "@/lib/tauri";
 import { useDraggable } from "@dnd-kit/core";
@@ -53,6 +55,9 @@ export function EntryListItem({
   formatTimestamp,
 }: EntryListItemProps) {
   const { toast } = useToast();
+  
+  // Get undo/redo context (may be undefined if not within provider)
+  const undoRedoContext = useUndoRedoContext();
   const iconId = entry.icon_id ?? 0;
 
   const { attributes, listeners, setNodeRef, isDragging: isDraggingLocal } = useDraggable({
@@ -77,24 +82,22 @@ export function EntryListItem({
       await updateEntry(updatedEntry);
       
       // Track for undo/redo
-      if (onRefresh) {
+      if (onRefresh && undoRedoContext) {
         const entryUuid = entry.uuid;
         const originalState = wasFavorite;
         const newState = !wasFavorite;
         
-        if ((window as any).__addToHistory) {
-          (window as any).__addToHistory(
-            `${newState ? 'Add' : 'Remove'} "${entry.title}" ${newState ? 'to' : 'from'} favorites`,
-            async () => {
-              await updateEntry({ ...entry, is_favorite: originalState });
-              onRefresh();
-            },
-            async () => {
-              await updateEntry({ ...entry, is_favorite: newState });
-              onRefresh();
-            }
-          );
-        }
+        undoRedoContext.addToHistory(
+          `${newState ? 'Add' : 'Remove'} "${entry.title}" ${newState ? 'to' : 'from'} favorites`,
+          async () => {
+            await updateEntry({ ...entry, is_favorite: originalState });
+            onRefresh();
+          },
+          async () => {
+            await updateEntry({ ...entry, is_favorite: newState });
+            onRefresh();
+          }
+        );
       }
       
       onRefresh();

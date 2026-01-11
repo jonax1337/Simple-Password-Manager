@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { logger } from "@/lib/logger";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, Edit, X, ShieldAlert, Trash2 } from "lucide-react";
 import { RefreshCcw } from "@/components/animate-ui/icons/refresh-ccw";
@@ -35,7 +36,7 @@ export function BreachedPasswordsCard({ refreshTrigger, databasePath, onEditEntr
           setDismissedUuids(dismissed);
         })
         .catch(error => {
-          console.error("Failed to load dismissed breaches:", error);
+          logger.error("Failed to load dismissed breaches", { category: "Security", data: error });
           toast({
             title: "Warning",
             description: "Could not load dismissed breach warnings",
@@ -99,7 +100,7 @@ export function BreachedPasswordsCard({ refreshTrigger, databasePath, onEditEntr
         variant: "info",
       });
     } catch (error: any) {
-      console.error("Failed to dismiss breach:", error);
+      logger.error("Failed to dismiss breach", { category: "Security", data: error });
       toast({
         title: "Error",
         description: error?.message || "Failed to dismiss breach warning",
@@ -154,7 +155,7 @@ export function BreachedPasswordsCard({ refreshTrigger, databasePath, onEditEntr
         });
       }
     } catch (error: any) {
-      console.error("Failed to bulk dismiss breaches:", error);
+      logger.error("Failed to bulk dismiss breaches", { category: "Security", data: error });
       toast({
         title: "Error",
         description: error?.message || "Failed to dismiss breach warnings",
