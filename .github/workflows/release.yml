@@ -19,8 +19,8 @@ jobs:
             platform: windows
           - os: ubuntu-latest
             platform: linux
-          - os: macos-latest
-            platform: macos
+          # macos-latest currently fails inside bundle_dmg.sh on the runner
+          # (Tauri 2 + GH macos-latest known issue). Re-add when fixed.
     
     runs-on: ${{ matrix.os }}
 
@@ -111,12 +111,8 @@ jobs:
           name: tauri-app-linux
           path: ./artifacts/linux
       
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: tauri-app-macos
-          path: ./artifacts/macos
-      
+      # macOS artifact step removed while bundle_dmg.sh is broken upstream.
+
       - name: List downloaded artifacts
         run: |
           echo "Downloaded artifacts:"
