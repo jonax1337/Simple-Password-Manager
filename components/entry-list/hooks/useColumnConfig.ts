@@ -47,6 +47,7 @@ export function useColumnConfig(databasePath?: string) {
           password: newColumns.find(c => c.id === 'password')?.visible ?? true,
           url: newColumns.find(c => c.id === 'url')?.visible ?? true,
           notes: newColumns.find(c => c.id === 'notes')?.visible ?? true,
+          totp: newColumns.find(c => c.id === 'totp')?.visible ?? true,
           created: newColumns.find(c => c.id === 'created')?.visible ?? false,
           modified: newColumns.find(c => c.id === 'modified')?.visible ?? false,
         };

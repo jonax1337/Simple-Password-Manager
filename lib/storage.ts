@@ -113,6 +113,7 @@ export interface ColumnVisibility {
   password: boolean;
   url: boolean;
   notes: boolean;
+  totp?: boolean;
   created: boolean;
   modified: boolean;
 }
@@ -123,6 +124,7 @@ export interface ColumnWidths {
   password: number;
   url: number;
   notes: number;
+  totp?: number;
   created: number;
   modified: number;
 }
