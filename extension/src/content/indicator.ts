@@ -1,17 +1,13 @@
-// In-field "saved login available" indicator — 1Password style, but
-// positioned OUTSIDE the input so it never collides with Chrome's native
-// autofill icon. Floats as a small chip just to the right of (or below,
-// if no horizontal room) the input, with a smooth fade+slide entrance.
-//
-// We don't touch the host page's CSS; the chip lives in a Shadow DOM and
-// uses position: fixed with its anchor recomputed on scroll/resize/
-// layout-change so it stays glued to its input.
+// "Saved login" pill placed inside the login input on its right edge —
+// 1Password style. Clicking the pill opens the picker (see picker.ts)
+// which always asks the user to confirm which account to fill, even
+// when there's only one match.
 
 import { isSameSite } from "./domain";
 
 const KNOWN_HOSTS_KEY = "known_hosts";
-const CHIP_WIDTH = 132;
-const CHIP_HEIGHT = 34;
+const PILL_SIZE = 22;
+const PILL_MARGIN_FROM_EDGE = 6;
 
 type AttachState = {
   input: HTMLInputElement;
@@ -20,6 +16,7 @@ type AttachState = {
   resizeObserver: ResizeObserver;
   mutationObserver: MutationObserver;
   reposition: () => void;
+  originalPaddingRight: string;
 };
 
 const attached = new WeakMap<HTMLInputElement, AttachState>();
@@ -52,45 +49,51 @@ export function attachIndicator(
   if (attached.has(input)) return;
   if (!document.body) return;
 
+  // Reserve a little space at the right edge of the input so the pill
+  // doesn't overlap with typed content. We remember the original value
+  // and restore it on detach.
+  const originalPaddingRight = input.style.paddingRight;
+  const currentPad = parseFloat(
+    window.getComputedStyle(input).paddingRight || "0",
+  );
+  const desiredPad = PILL_SIZE + PILL_MARGIN_FROM_EDGE * 2;
+  if (currentPad < desiredPad) {
+    input.style.paddingRight = `${desiredPad}px`;
+  }
+
   const host = document.createElement("div");
   Object.assign(host.style, {
     position: "fixed",
     zIndex: "2147483647",
     pointerEvents: "none",
     fontFamily:
-      'system-ui, -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+      'system-ui, -apple-system, BlinkMacSystemFont, "Inter Variable", "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
     opacity: "0",
     transition: "opacity 200ms ease-out, transform 200ms ease-out",
-    transform: "translateX(-4px)",
+    transform: "scale(0.85)",
   } satisfies Partial<CSSStyleDeclaration>);
 
   const shadow = host.attachShadow({ mode: "open" });
   shadow.innerHTML = `
-    <style>${chipCss()}</style>
-    <button class="chip" type="button" aria-label="Fill with Simple Password Manager">
-      <span class="icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3"/>
-        </svg>
-      </span>
-      <span class="text">Saved login</span>
-      <span class="caret" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="9 18 15 12 9 6"/>
-        </svg>
-      </span>
+    <style>${pillCss()}</style>
+    <button class="pill" type="button" aria-label="Fill with Simple Password Manager">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3"/>
+      </svg>
     </button>
   `;
   document.body.appendChild(host);
 
-  const button = shadow.querySelector<HTMLButtonElement>(".chip")!;
+  const button = shadow.querySelector<HTMLButtonElement>(".pill")!;
   button.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     button.classList.add("pressed");
     setTimeout(() => button.classList.remove("pressed"), 180);
+    // Blur the input so the browser's autofill dropdown closes before
+    // we show our own picker.
+    input.blur();
     onClick();
   });
   button.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -102,43 +105,11 @@ export function attachIndicator(
       host.style.pointerEvents = "none";
       return;
     }
-
-    const viewportW = window.innerWidth;
-    const viewportH = window.innerHeight;
-    const margin = 6;
-
-    let top: number;
-    let left: number;
-    let placement: "right" | "below" | "above" = "right";
-
-    // Prefer placing to the right of the input — out of Chrome's own
-    // autofill icon's territory.
-    if (rect.right + margin + CHIP_WIDTH <= viewportW) {
-      placement = "right";
-      left = rect.right + margin;
-      top = rect.top + (rect.height - CHIP_HEIGHT) / 2;
-    } else if (rect.bottom + margin + CHIP_HEIGHT <= viewportH) {
-      placement = "below";
-      left = Math.max(
-        4,
-        Math.min(rect.left, viewportW - CHIP_WIDTH - 4),
-      );
-      top = rect.bottom + margin;
-    } else {
-      placement = "above";
-      left = Math.max(
-        4,
-        Math.min(rect.left, viewportW - CHIP_WIDTH - 4),
-      );
-      top = rect.top - CHIP_HEIGHT - margin;
-    }
-
     host.style.opacity = "1";
     host.style.pointerEvents = "auto";
-    host.style.transform = "translateX(0)";
-    host.style.left = `${left}px`;
-    host.style.top = `${top}px`;
-    host.dataset.placement = placement;
+    host.style.transform = "scale(1)";
+    host.style.left = `${rect.right - PILL_SIZE - PILL_MARGIN_FROM_EDGE}px`;
+    host.style.top = `${rect.top + (rect.height - PILL_SIZE) / 2}px`;
   };
 
   reposition();
@@ -147,7 +118,6 @@ export function attachIndicator(
   window.addEventListener("scroll", reposition, true);
   window.addEventListener("resize", reposition);
 
-  // Self-removal if the input gets detached from the DOM.
   const mutationObserver = new MutationObserver(() => {
     if (!document.contains(input)) {
       detachIndicator(input);
@@ -165,6 +135,7 @@ export function attachIndicator(
     resizeObserver,
     mutationObserver,
     reposition,
+    originalPaddingRight,
   });
   trackedInputs.add(input);
 }
@@ -177,7 +148,13 @@ export function detachIndicator(input: HTMLInputElement): void {
   window.removeEventListener("scroll", state.reposition, true);
   window.removeEventListener("resize", state.reposition);
   state.host.style.opacity = "0";
-  // Allow fade-out to play before removing.
+  state.host.style.transform = "scale(0.85)";
+  // Restore the input's original padding once the fade is done.
+  try {
+    state.input.style.paddingRight = state.originalPaddingRight;
+  } catch {
+    /* input might already be detached */
+  }
   setTimeout(() => state.host.remove(), 220);
   attached.delete(input);
   trackedInputs.delete(input);
@@ -189,77 +166,45 @@ export function detachAllIndicators(): void {
   }
 }
 
-function chipCss(): string {
+function pillCss(): string {
   return `
     :host { all: initial; }
-    .chip {
+    .pill {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      width: ${CHIP_WIDTH}px;
-      height: ${CHIP_HEIGHT}px;
-      padding: 0 10px 0 8px;
-      border-radius: 10px;
+      justify-content: center;
+      width: ${PILL_SIZE}px;
+      height: ${PILL_SIZE}px;
+      border-radius: 6px;
       border: 1px solid transparent;
       background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
       color: #fff;
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.005em;
       cursor: pointer;
       box-shadow:
-        0 1px 2px rgba(0, 0, 0, 0.08),
-        0 8px 24px -10px rgba(99, 102, 241, 0.55);
+        0 0 0 0 rgba(99, 102, 241, 0),
+        0 1px 2px rgba(0, 0, 0, 0.18),
+        0 4px 12px -2px rgba(99, 102, 241, 0.45);
       transition:
         background-position 220ms ease,
         transform 140ms ease,
         box-shadow 220ms ease,
         filter 160ms ease;
       background-size: 200% 100%;
+      padding: 0;
     }
-    .chip:hover {
+    .pill:hover {
       background-position: right center;
       box-shadow:
-        0 1px 2px rgba(0, 0, 0, 0.08),
-        0 12px 30px -10px rgba(99, 102, 241, 0.75);
-      transform: translateY(-1px);
+        0 0 0 3px rgba(99, 102, 241, 0.16),
+        0 1px 2px rgba(0, 0, 0, 0.18),
+        0 6px 16px -2px rgba(99, 102, 241, 0.55);
+      transform: scale(1.08);
     }
-    .chip:active,
-    .chip.pressed {
-      transform: translateY(0) scale(0.97);
+    .pill:active,
+    .pill.pressed {
+      transform: scale(0.94);
       filter: brightness(0.95);
     }
-    .icon, .caret {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .icon svg { width: 13px; height: 13px; }
-    .caret svg { width: 11px; height: 11px; opacity: 0.85; }
-    .text {
-      flex: 1;
-      min-width: 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: left;
-      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
-    }
-    /* When attached below or above the input, point the chip a touch with
-       a soft glow on the field-facing side. */
-    :host([data-placement="below"]) .chip {
-      border-top-left-radius: 6px;
-    }
-    :host([data-placement="above"]) .chip {
-      border-bottom-left-radius: 6px;
-    }
-    @media (prefers-color-scheme: dark) {
-      .chip {
-        box-shadow:
-          0 1px 2px rgba(0, 0, 0, 0.4),
-          0 12px 30px -10px rgba(99, 102, 241, 0.55);
-      }
-    }
+    svg { width: 12px; height: 12px; }
   `;
 }

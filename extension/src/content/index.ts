@@ -18,6 +18,7 @@ import {
   pageHasSavedLogin,
   refreshKnownHostsCache,
 } from "./indicator";
+import { dismissActivePicker, showPicker, type PickerEntry } from "./picker";
 
 const LOG = "[SPM]";
 
@@ -158,16 +159,16 @@ function attachIndicatorsToVisibleFields(): void {
   if (!indicatorsReady) return;
   const passwordField = findPasswordField();
   if (passwordField && !looksLikeOtpField(passwordField, "")) {
-    attachIndicator(passwordField, () => void onIndicatorClick());
+    attachIndicator(passwordField, () => void onIndicatorClick(passwordField));
   }
   const usernameField = findUsernameField(passwordField);
   if (usernameField) {
-    attachIndicator(usernameField, () => void onIndicatorClick());
+    attachIndicator(usernameField, () => void onIndicatorClick(usernameField));
   }
 }
 
-async function onIndicatorClick(): Promise<void> {
-  // First, check status. If the vault is locked, focus the app and bail.
+async function onIndicatorClick(anchor: HTMLInputElement): Promise<void> {
+  // Status check first. Locked vault → focus the desktop app.
   const status = await chrome.runtime
     .sendMessage({ kind: "fetch", method: "GET", path: "/v1/status" })
     .catch(() => ({ ok: false }));
@@ -185,26 +186,35 @@ async function onIndicatorClick(): Promise<void> {
   }
 
   const host = window.location.hostname;
-  const listResp: { ok: boolean; data?: { uuid: string; title: string }[] } =
-    await chrome.runtime
-      .sendMessage({
-        kind: "fetch",
-        method: "GET",
-        path: `/v1/entries?domain=${encodeURIComponent(host)}`,
-      })
-      .catch(() => ({ ok: false }));
+  const listResp: { ok: boolean; data?: PickerEntry[] } = await chrome.runtime
+    .sendMessage({
+      kind: "fetch",
+      method: "GET",
+      path: `/v1/entries?domain=${encodeURIComponent(host)}`,
+    })
+    .catch(() => ({ ok: false }));
   if (!listResp?.ok || !listResp.data || listResp.data.length === 0) {
     console.debug(LOG, "indicator click: no matching entries");
     return;
   }
 
-  const choice = listResp.data[0];
+  // Always show the picker — even with a single entry, the user explicitly
+  // confirms which account to fill (1Password convention).
+  showPicker({
+    anchor,
+    hostDomain: host,
+    entries: listResp.data,
+    onPick: (entry) => void fillFromEntry(entry),
+  });
+}
+
+async function fillFromEntry(entry: PickerEntry): Promise<void> {
   const pwResp: { ok: boolean; data?: { username: string; password: string } } =
     await chrome.runtime
       .sendMessage({
         kind: "fetch",
         method: "GET",
-        path: `/v1/entries/${encodeURIComponent(choice.uuid)}/password`,
+        path: `/v1/entries/${encodeURIComponent(entry.uuid)}/password`,
       })
       .catch(() => ({ ok: false }));
   if (!pwResp?.ok || !pwResp.data) return;
@@ -213,7 +223,7 @@ async function onIndicatorClick(): Promise<void> {
   if (!pw) return;
   const un = findUsernameField(pw);
 
-  console.debug(LOG, "filling form with", choice.title || "(untitled)");
+  console.debug(LOG, "filling form with", entry.title || "(untitled)");
   setNativeValue(pw, pwResp.data.password);
   if (un && pwResp.data.username) {
     setNativeValue(un, pwResp.data.username);
@@ -227,6 +237,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (!("known_hosts" in changes)) return;
   // Tear down + retry: maybe the page acquired (or lost) a match.
+  dismissActivePicker();
   detachAllIndicators();
   indicatorsReady = false;
   void setupIndicators();
