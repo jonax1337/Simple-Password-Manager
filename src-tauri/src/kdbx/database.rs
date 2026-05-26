@@ -2,7 +2,7 @@ use argon2::Version as Argon2Version;
 use keepass::{
     config::{DatabaseConfig, KdfConfig},
     db::{EntryId, GroupId},
-    Database as KeepassDatabase, DatabaseKey,
+    ChallengeResponseKey, Database as KeepassDatabase, DatabaseKey,
 };
 use secrecy::{ExposeSecret, SecretString};
 use std::fs::File;
@@ -10,17 +10,85 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use super::error::DatabaseError;
-use super::types::KdfInfo;
+use super::types::{KdfInfo, YubikeyConfig, YubikeyInfo};
 
 pub struct Database {
     pub db: KeepassDatabase,
     pub path: PathBuf,
     pub password: SecretString,
+    /// If set, the database is encrypted with master password + a Yubikey
+    /// HMAC-SHA1 challenge-response. We remember which key + slot the user
+    /// chose so we can perform the same challenge on every save.
+    pub yubikey: Option<YubikeyConfig>,
     pub last_modified: Option<SystemTime>,
+}
+
+/// List Yubikeys currently connected. Exposed via a Tauri command so the
+/// frontend can populate a "pick a key" dropdown during Yubikey setup.
+pub fn list_available_yubikeys() -> Result<Vec<YubikeyInfo>, DatabaseError> {
+    match ChallengeResponseKey::get_available_yubikeys() {
+        Ok(keys) => Ok(keys
+            .iter()
+            .map(|y| YubikeyInfo {
+                serial_number: y.serial_number,
+                name: y.name.clone(),
+            })
+            .collect()),
+        Err(e) => {
+            // The `ChallengeResponseKeyError` enum lives in a private
+            // module so we can't match on its variants directly. The
+            // crate's Display for NoKeys is stable enough to string-match
+            // against — and we want the same "empty list" outcome for any
+            // failure that means "no keys reachable", including HID
+            // permission errors on Linux.
+            let msg = e.to_string();
+            if msg.to_lowercase().contains("no challenge") {
+                Ok(Vec::new())
+            } else {
+                Err(DatabaseError::OpenError(format!(
+                    "Failed to enumerate Yubikeys: {}",
+                    msg
+                )))
+            }
+        }
+    }
+}
+
+// Build a DatabaseKey from a password + optional Yubikey. The Yubikey
+// touch happens inside `keepass`'s code (it calls challenge_response
+// when DatabaseKey::perform_challenge is invoked during open/save).
+fn build_key(
+    password: &SecretString,
+    yubikey: Option<&YubikeyConfig>,
+) -> Result<DatabaseKey, DatabaseError> {
+    let mut key = DatabaseKey::new().with_password(password.expose_secret());
+
+    if let Some(cfg) = yubikey {
+        let yk = ChallengeResponseKey::get_yubikey(Some(cfg.serial_number)).map_err(|e| {
+            DatabaseError::OpenError(format!(
+                "Yubikey with serial {} not found: {}",
+                cfg.serial_number, e
+            ))
+        })?;
+        key = key.with_challenge_response_key(ChallengeResponseKey::YubikeyChallenge(
+            yk,
+            cfg.slot.clone(),
+        ));
+    }
+
+    Ok(key)
 }
 
 impl Database {
     pub fn create(path: PathBuf, password: String) -> Result<Self, DatabaseError> {
+        Self::create_with_yubikey(path, password, None)
+    }
+
+    pub fn create_with_yubikey(
+        path: PathBuf,
+        password: String,
+        yubikey: Option<YubikeyConfig>,
+    ) -> Result<Self, DatabaseError> {
         let secret_password = SecretString::new(password.into_boxed_str());
 
         let db_name = path
@@ -40,6 +108,7 @@ impl Database {
             db,
             path: path.clone(),
             password: secret_password,
+            yubikey,
             last_modified: None,
         };
 
@@ -52,12 +121,20 @@ impl Database {
     }
 
     pub fn open(path: PathBuf, password: String) -> Result<Self, DatabaseError> {
+        Self::open_with_yubikey(path, password, None)
+    }
+
+    pub fn open_with_yubikey(
+        path: PathBuf,
+        password: String,
+        yubikey: Option<YubikeyConfig>,
+    ) -> Result<Self, DatabaseError> {
         let secret_password = SecretString::new(password.into_boxed_str());
 
         let mut file = File::open(&path)
             .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;
 
-        let key = DatabaseKey::new().with_password(secret_password.expose_secret());
+        let key = build_key(&secret_password, yubikey.as_ref())?;
 
         let db = KeepassDatabase::open(&mut file, key).map_err(|e| {
             // keepass 0.13.x surfaces a wrong-password failure as "Incorrect key";
@@ -79,12 +156,13 @@ impl Database {
             db,
             path,
             password: secret_password,
+            yubikey,
             last_modified,
         })
     }
 
     pub fn save(&mut self) -> Result<(), DatabaseError> {
-        let key = DatabaseKey::new().with_password(self.password.expose_secret());
+        let key = build_key(&self.password, self.yubikey.as_ref())?;
 
         let mut file = File::create(&self.path)
             .map_err(|e| DatabaseError::SaveError(format!("Failed to create file: {}", e)))?;
@@ -98,6 +176,30 @@ impl Database {
             .and_then(|m| m.modified().ok());
 
         Ok(())
+    }
+
+    /// Add (or replace) the Yubikey requirement on the currently-open
+    /// database. The next `save()` re-encrypts the file using master
+    /// password + Yubikey challenge-response.
+    pub fn enable_yubikey(&mut self, config: YubikeyConfig) -> Result<(), DatabaseError> {
+        // Verify the configured Yubikey is actually plugged in BEFORE
+        // we commit. Otherwise the user would lose access to their DB
+        // on the next save.
+        let _ = ChallengeResponseKey::get_yubikey(Some(config.serial_number)).map_err(|e| {
+            DatabaseError::OpenError(format!(
+                "Yubikey with serial {} not detected: {}",
+                config.serial_number, e
+            ))
+        })?;
+        self.yubikey = Some(config);
+        self.save()
+    }
+
+    /// Drop the Yubikey requirement. Saves the file with master-password
+    /// only encryption afterwards.
+    pub fn disable_yubikey(&mut self) -> Result<(), DatabaseError> {
+        self.yubikey = None;
+        self.save()
     }
 
     pub fn check_for_changes(&self) -> Result<bool, DatabaseError> {
@@ -115,7 +217,11 @@ impl Database {
         let mut file = File::open(&self.path)
             .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;
 
-        let key = DatabaseKey::new().with_password(self.password.expose_secret());
+        // Merge requires reading the on-disk version, which means a fresh
+        // Yubikey touch if challenge-response is enabled. There's no way
+        // around that — the file is encrypted with the live challenge
+        // result, not a stored key.
+        let key = build_key(&self.password, self.yubikey.as_ref())?;
 
         let disk_db = KeepassDatabase::open(&mut file, key)
             .map_err(|e| DatabaseError::OpenError(e.to_string()))?;

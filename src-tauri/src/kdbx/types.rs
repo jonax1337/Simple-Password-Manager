@@ -57,6 +57,24 @@ pub struct KdfInfo {
     pub parallelism: Option<u32>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct YubikeyConfig {
+    /// 32-bit serial number printed on the back of the YubiKey. Used to
+    /// reconnect to the same physical device on subsequent unlocks even
+    /// when multiple keys are plugged in.
+    pub serial_number: u32,
+    /// "1" or "2" — which Yubikey slot is programmed for HMAC-SHA1
+    /// challenge-response. Kept as a string because that's what the
+    /// keepass crate's API takes.
+    pub slot: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct YubikeyInfo {
+    pub serial_number: u32,
+    pub name: Option<String>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DashboardStats {
     pub total_entries: usize,

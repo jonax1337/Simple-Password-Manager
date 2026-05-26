@@ -10,8 +10,9 @@ import { openDatabase } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
 import { KdfWarningDialog } from "@/components/KdfWarningDialog";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
-import { addRecentDatabase } from "@/lib/storage";
+import { addRecentDatabase, getYubikeyHint } from "@/lib/storage";
 import { invoke } from "@tauri-apps/api/core";
+import { KeyRound } from "lucide-react";
 
 interface QuickUnlockScreenProps {
   lastDatabasePath: string;
@@ -29,6 +30,7 @@ export function QuickUnlockScreen({
   const [showKdfWarning, setShowKdfWarning] = useState(false);
   const [kdfType, setKdfType] = useState("");
   const { toast } = useToast();
+  const yubikeyHint = getYubikeyHint(lastDatabasePath);
 
   const handleUnlock = async () => {
     if (!password) {
@@ -42,7 +44,11 @@ export function QuickUnlockScreen({
 
     setLoading(true);
     try {
-      const [rootGroup, dbPath] = await openDatabase(lastDatabasePath, password);
+      const [rootGroup, dbPath] = await openDatabase(
+        lastDatabasePath,
+        password,
+        yubikeyHint,
+      );
       addRecentDatabase(lastDatabasePath);
       
       // Check if KDF warning was dismissed for this database
@@ -159,12 +165,28 @@ export function QuickUnlockScreen({
             />
           </div>
 
+          {yubikeyHint && (
+            <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-xs">
+              <KeyRound className="mt-0.5 h-4 w-4 text-primary shrink-0" />
+              <div>
+                <p className="font-medium text-sm">Yubikey required</p>
+                <p className="text-muted-foreground">
+                  Plug in serial #{yubikeyHint.serial_number} and touch it when prompted.
+                </p>
+              </div>
+            </div>
+          )}
+
           <Button
             onClick={handleUnlock}
             disabled={loading || !password}
             className="w-full"
           >
-            {loading ? "Unlocking..." : "Unlock"}
+            {loading
+              ? yubikeyHint
+                ? "Touch your Yubikey…"
+                : "Unlocking..."
+              : "Unlock"}
           </Button>
 
           <Button

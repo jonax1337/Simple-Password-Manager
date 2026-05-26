@@ -6,3 +6,4 @@ pub mod password;
 pub mod search;
 pub mod security;
 pub mod totp;
+pub mod yubikey;

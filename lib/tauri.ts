@@ -62,12 +62,49 @@ export interface BreachedEntry {
   breach_count: number;
 }
 
-export async function createDatabase(path: string, password: string): Promise<GroupData> {
-  return invoke("create_database", { path, password });
+/** A Yubikey HMAC-SHA1 challenge-response factor attached to a database. */
+export interface YubikeyConfig {
+  serial_number: number;
+  slot: string; // "1" or "2"
 }
 
-export async function openDatabase(path: string, password: string): Promise<[GroupData, string]> {
-  return invoke("open_database", { path, password });
+export interface YubikeyInfo {
+  serial_number: number;
+  name: string | null;
+}
+
+export async function createDatabase(
+  path: string,
+  password: string,
+  yubikey: YubikeyConfig | null = null,
+): Promise<GroupData> {
+  return invoke("create_database", { path, password, yubikey });
+}
+
+export async function openDatabase(
+  path: string,
+  password: string,
+  yubikey: YubikeyConfig | null = null,
+): Promise<[GroupData, string]> {
+  return invoke("open_database", { path, password, yubikey });
+}
+
+// --- Yubikey-specific commands ---
+
+export async function listYubikeys(): Promise<YubikeyInfo[]> {
+  return invoke("list_yubikeys");
+}
+
+export async function enableYubikey(serialNumber: number, slot: string): Promise<void> {
+  return invoke("enable_yubikey", { serialNumber, slot });
+}
+
+export async function disableYubikey(): Promise<void> {
+  return invoke("disable_yubikey");
+}
+
+export async function yubikeyEnabledForOpenDb(): Promise<boolean> {
+  return invoke("yubikey_enabled_for_open_db");
 }
 
 export async function saveDatabase(): Promise<void> {

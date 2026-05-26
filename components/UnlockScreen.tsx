@@ -5,14 +5,14 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FolderOpen, Plus } from "lucide-react";
+import { FolderOpen, Plus, KeyRound } from "lucide-react";
 import { openDatabase } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CreateDatabaseDialog } from "@/components/CreateDatabaseDialog";
 import { KdfWarningDialog } from "@/components/KdfWarningDialog";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
-import { saveLastDatabasePath, addRecentDatabase } from "@/lib/storage";
+import { saveLastDatabasePath, addRecentDatabase, getYubikeyHint } from "@/lib/storage";
 import { invoke } from "@tauri-apps/api/core";
 import Image from "next/image";
 
@@ -36,6 +36,11 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
       setFilePath(initialFilePath);
     }
   }, [initialFilePath]);
+
+  // Surface the "this database needs a Yubikey" hint as soon as the file
+  // is picked, so the user knows to plug their key in before clicking
+  // Unlock instead of getting an opaque "incorrect password" error.
+  const yubikeyHint = filePath ? getYubikeyHint(filePath) : null;
 
   const handleSelectFile = async () => {
     try {
@@ -73,7 +78,7 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
 
     setLoading(true);
     try {
-      const [rootGroup, dbPath] = await openDatabase(filePath, password);
+      const [rootGroup, dbPath] = await openDatabase(filePath, password, yubikeyHint);
       saveLastDatabasePath(filePath);
       addRecentDatabase(filePath);
       
@@ -219,12 +224,28 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
               />
             </div>
 
+            {yubikeyHint && (
+              <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm">
+                <KeyRound className="mt-0.5 h-4 w-4 text-primary shrink-0" />
+                <div>
+                  <p className="font-medium">Yubikey required</p>
+                  <p className="text-xs text-muted-foreground">
+                    Plug in your Yubikey (serial #{yubikeyHint.serial_number}) — you&apos;ll be asked to touch it after submitting.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <Button
               onClick={handleUnlock}
               disabled={loading || !filePath || !password}
               className="w-full"
             >
-              {loading ? "Unlocking..." : "Unlock Database"}
+              {loading
+                ? yubikeyHint
+                  ? "Touch your Yubikey…"
+                  : "Unlocking..."
+                : "Unlock Database"}
             </Button>
 
             <div className="relative">

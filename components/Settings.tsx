@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw, Rocket, Download, Puzzle } from "lucide-react";
+import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw, Rocket, Download, Puzzle, KeyRound } from "lucide-react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useTheme } from "next-themes";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -24,8 +24,16 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
-import { getHibpEnabled, setHibpEnabled, getLiveUpdates, setLiveUpdates, getCloseToTray, setCloseToTray } from "@/lib/storage";
-import { detectBrowsers, installNativeHost, uninstallNativeHost, type BrowserInfo, type InstallReport } from "@/lib/tauri";
+import { getHibpEnabled, setHibpEnabled, getLiveUpdates, setLiveUpdates, getCloseToTray, setCloseToTray, getYubikeyHint, setYubikeyHint } from "@/lib/storage";
+import { detectBrowsers, installNativeHost, uninstallNativeHost, type BrowserInfo, type InstallReport, listYubikeys, enableYubikey, disableYubikey, yubikeyEnabledForOpenDb, type YubikeyInfo } from "@/lib/tauri";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export function Settings() {
   const { theme, setTheme } = useTheme();
@@ -48,6 +56,20 @@ export function Settings() {
   const [mounted, setMounted] = useState(false);
   const [currentDbPath, setCurrentDbPath] = useState<string>("");
 
+  // ---------- Yubikey state ----------
+  // `yubikeyActive` is the authoritative answer from the backend ("is the
+  // open database currently encrypted with challenge-response?"). The
+  // localStorage hint is purely a UX shortcut for the unlock screen, so
+  // we keep them in sync but the backend wins on disagreement.
+  const [yubikeyActive, setYubikeyActive] = useState<boolean>(false);
+  const [yubikeyDialogOpen, setYubikeyDialogOpen] = useState(false);
+  const [yubikeyDevices, setYubikeyDevices] = useState<YubikeyInfo[]>([]);
+  const [yubikeySelected, setYubikeySelected] = useState<number | null>(null);
+  const [yubikeySlot, setYubikeySlot] = useState<string>("2");
+  const [yubikeyDetecting, setYubikeyDetecting] = useState(false);
+  const [yubikeyBusy, setYubikeyBusy] = useState(false);
+  const [yubikeyError, setYubikeyError] = useState<string>("");
+
   useEffect(() => {
     setMounted(true);
     // Load auto-lock setting from localStorage
@@ -69,7 +91,75 @@ export function Settings() {
       setCurrentDbPath(dbPath);
       setLiveUpdatesEnabled(getLiveUpdates(dbPath));
     }
+    // Ask the backend whether the open DB is Yubikey-protected.
+    yubikeyEnabledForOpenDb()
+      .then(setYubikeyActive)
+      .catch(() => setYubikeyActive(false));
   }, []);
+
+  // -- Yubikey handlers --
+
+  async function detectYubikeys() {
+    setYubikeyDetecting(true);
+    setYubikeyError("");
+    try {
+      const keys = await listYubikeys();
+      setYubikeyDevices(keys);
+      if (keys.length === 1) setYubikeySelected(keys[0].serial_number);
+      if (keys.length === 0) {
+        setYubikeyError(
+          "No Yubikey detected. Insert your key and click Detect again.",
+        );
+      }
+    } catch (e) {
+      setYubikeyError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setYubikeyDetecting(false);
+    }
+  }
+
+  async function handleYubikeyToggle(checked: boolean) {
+    if (checked) {
+      setYubikeyDialogOpen(true);
+      setYubikeyError("");
+      void detectYubikeys();
+      return;
+    }
+    // Turning OFF — touch the key one last time so the disable-save succeeds.
+    setYubikeyBusy(true);
+    setYubikeyError("");
+    try {
+      await disableYubikey();
+      setYubikeyHint(currentDbPath, null);
+      setYubikeyActive(false);
+    } catch (e) {
+      setYubikeyError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setYubikeyBusy(false);
+    }
+  }
+
+  async function confirmEnableYubikey() {
+    if (yubikeySelected === null) {
+      setYubikeyError("Pick a Yubikey to use.");
+      return;
+    }
+    setYubikeyBusy(true);
+    setYubikeyError("");
+    try {
+      await enableYubikey(yubikeySelected, yubikeySlot);
+      setYubikeyHint(currentDbPath, {
+        serial_number: yubikeySelected,
+        slot: yubikeySlot,
+      });
+      setYubikeyActive(true);
+      setYubikeyDialogOpen(false);
+    } catch (e) {
+      setYubikeyError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setYubikeyBusy(false);
+    }
+  }
 
   const handleClose = async () => {
     const window = getCurrentWebviewWindow();
@@ -351,6 +441,150 @@ export function Settings() {
                   </p>
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <KeyRound className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-sm font-medium">Yubikey</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Require a Yubikey HMAC-SHA1 touch in addition to the master password.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="yubikey-toggle" className="text-sm">
+                        Use a Yubikey to unlock
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {yubikeyActive
+                          ? "Currently active — your key is needed on every unlock and save."
+                          : "Adds a hardware factor to this database."}
+                      </p>
+                    </div>
+                    <Switch
+                      id="yubikey-toggle"
+                      checked={yubikeyActive}
+                      onCheckedChange={handleYubikeyToggle}
+                      disabled={!currentDbPath || yubikeyBusy}
+                    />
+                  </div>
+                  {!currentDbPath && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500 mt-3">
+                      No database is currently open. This setting is per-database.
+                    </p>
+                  )}
+                  {yubikeyError && !yubikeyDialogOpen && (
+                    <p className="text-xs text-destructive mt-3">{yubikeyError}</p>
+                  )}
+                  {yubikeyActive && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500 mt-3">
+                      If you lose this Yubikey you&apos;ll need a recovery flow. KeePassXC
+                      can open Yubikey-protected files if you have a backup key
+                      registered.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Dialog
+                open={yubikeyDialogOpen}
+                onOpenChange={(open) => {
+                  if (!yubikeyBusy) setYubikeyDialogOpen(open);
+                }}
+              >
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Set up a Yubikey</DialogTitle>
+                    <DialogDescription>
+                      Insert your Yubikey, pick the HMAC-SHA1 slot, and we&apos;ll
+                      re-encrypt the database with that key as a second factor.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-sm">Detected keys</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={detectYubikeys}
+                        disabled={yubikeyDetecting || yubikeyBusy}
+                      >
+                        {yubikeyDetecting ? "Detecting…" : "Detect"}
+                      </Button>
+                    </div>
+
+                    {yubikeyDevices.length > 0 ? (
+                      <Select
+                        value={yubikeySelected?.toString() ?? ""}
+                        onValueChange={(v) => setYubikeySelected(Number(v))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pick a Yubikey" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {yubikeyDevices.map((y) => (
+                            <SelectItem
+                              key={y.serial_number}
+                              value={y.serial_number.toString()}
+                            >
+                              {y.name ?? `Serial ${y.serial_number}`} · #
+                              {y.serial_number}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {yubikeyDetecting
+                          ? "Looking for keys…"
+                          : "No Yubikey detected. Plug yours in and click Detect."}
+                      </p>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label className="text-sm">Slot</Label>
+                      <Select value={yubikeySlot} onValueChange={setYubikeySlot}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">Slot 1 (short touch)</SelectItem>
+                          <SelectItem value="2">Slot 2 (long touch)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Make sure the chosen slot is programmed for HMAC-SHA1
+                        challenge-response. Slot 2 is the YubiKey default for this.
+                      </p>
+                    </div>
+
+                    {yubikeyError && (
+                      <p className="text-xs text-destructive">{yubikeyError}</p>
+                    )}
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setYubikeyDialogOpen(false)}
+                      disabled={yubikeyBusy}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={confirmEnableYubikey}
+                      disabled={yubikeyBusy || yubikeySelected === null}
+                    >
+                      {yubikeyBusy ? "Saving — touch your key…" : "Enable Yubikey"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </ScrollArea>
         </TabsContent>

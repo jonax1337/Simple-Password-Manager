@@ -1,4 +1,4 @@
-use simple_password_manager::kdbx::{Database, GroupData, KdfInfo};
+use simple_password_manager::kdbx::{Database, GroupData, KdfInfo, YubikeyConfig};
 use simple_password_manager::state::AppState;
 use std::io::Read;
 use std::path::PathBuf;
@@ -33,8 +33,10 @@ pub fn create_database(
     state: State<AppState>,
     path: String,
     password: String,
+    yubikey: Option<YubikeyConfig>,
 ) -> Result<GroupData, String> {
-    let db = Database::create(PathBuf::from(&path), password).map_err(|e| e.to_string())?;
+    let db = Database::create_with_yubikey(PathBuf::from(&path), password, yubikey)
+        .map_err(|e| e.to_string())?;
 
     let root_group = db.get_root_group();
 
@@ -53,9 +55,11 @@ pub fn open_database(
     state: State<AppState>,
     path: String,
     password: String,
+    yubikey: Option<YubikeyConfig>,
 ) -> Result<(GroupData, String), String> {
     let path_buf = PathBuf::from(&path);
-    let db = Database::open(path_buf.clone(), password).map_err(|e| e.to_string())?;
+    let db = Database::open_with_yubikey(path_buf.clone(), password, yubikey)
+        .map_err(|e| e.to_string())?;
 
     let root_group = db.get_root_group();
 

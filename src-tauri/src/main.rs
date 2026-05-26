@@ -89,6 +89,10 @@ fn main() {
             commands::browser_extension::install_native_host,
             commands::browser_extension::uninstall_native_host,
             commands::totp::preview_totp,
+            commands::yubikey::list_yubikeys,
+            commands::yubikey::enable_yubikey,
+            commands::yubikey::disable_yubikey,
+            commands::yubikey::yubikey_enabled_for_open_db,
         ])
         .setup(|app| {
             // Set up system tray

@@ -6,5 +6,8 @@ mod search;
 mod stats;
 mod types;
 
-pub use database::Database;
-pub use types::{CustomField, DashboardStats, EntryData, GroupData, HistoryEntry, KdfInfo};
+pub use database::{list_available_yubikeys, Database};
+pub use types::{
+    CustomField, DashboardStats, EntryData, GroupData, HistoryEntry, KdfInfo, YubikeyConfig,
+    YubikeyInfo,
+};

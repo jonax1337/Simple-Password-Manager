@@ -304,6 +304,47 @@ export function getSearchScope(dbPath: string): SearchScope {
   return 'global';
 }
 
+// Yubikey-per-database state. Stored alongside the user's other per-DB
+// preferences (search scope, live updates, column config etc.) so the
+// unlock screen can decide whether to prompt for the key without first
+// trying to open the file. We deliberately don't persist the secret —
+// just the serial and slot, so the user can plug in the right key.
+const YUBIKEY_PREFIX = "yubikey_";
+
+export interface YubikeyHint {
+  serial_number: number;
+  slot: string;
+}
+
+function getYubikeyKey(dbPath: string): string {
+  return YUBIKEY_PREFIX + btoa(dbPath).replace(/[^a-zA-Z0-9]/g, "").slice(0, 32);
+}
+
+export function setYubikeyHint(dbPath: string, hint: YubikeyHint | null): void {
+  if (typeof window === "undefined" || !dbPath) return;
+  const key = getYubikeyKey(dbPath);
+  if (hint === null) {
+    localStorage.removeItem(key);
+  } else {
+    localStorage.setItem(key, JSON.stringify(hint));
+  }
+}
+
+export function getYubikeyHint(dbPath: string): YubikeyHint | null {
+  if (typeof window === "undefined" || !dbPath) return null;
+  const stored = localStorage.getItem(getYubikeyKey(dbPath));
+  if (!stored) return null;
+  try {
+    const parsed = JSON.parse(stored) as YubikeyHint;
+    if (typeof parsed.serial_number === "number" && typeof parsed.slot === "string") {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Live Updates management (automatic merging per database)
 function getLiveUpdatesKey(dbPath: string): string {
   return LIVE_UPDATES_PREFIX + btoa(dbPath).replace(/[^a-zA-Z0-9]/g, '').slice(0, 32);
