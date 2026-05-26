@@ -158,19 +158,20 @@ function Header(props: {
   loading: boolean;
 }) {
   return (
-    <header className="border-b border-border bg-card/40 px-3 py-2.5">
+    <header className="relative border-b border-border/70 bg-gradient-to-b from-card/60 to-card/20 backdrop-blur-sm px-4 py-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/15">
-            <KeyRound className="h-3.5 w-3.5 text-primary" />
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/10 ring-1 ring-primary/20 shadow-sm shadow-primary/10">
+            <KeyRound className="h-4 w-4 text-primary" />
+            <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none" />
           </div>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">
+            <div className="truncate text-sm font-semibold tracking-tight">
               {props.dbName ?? "Simple Password Manager"}
             </div>
-            <div className="truncate text-[11px] text-muted-foreground">
+            <div className="truncate text-[11px] text-muted-foreground/90 font-medium">
               {props.loading
-                ? "…"
+                ? "Connecting…"
                 : props.domain ?? "no http(s) tab"}
             </div>
           </div>
@@ -197,22 +198,29 @@ function Tabs(props: {
         disabled={disabled}
         onClick={() => props.setView(id)}
         className={cn(
-          "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium transition-colors",
-          "border-t-2",
+          "relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-all duration-200",
           active
-            ? "border-primary text-primary"
-            : "border-transparent text-muted-foreground hover:text-foreground",
+            ? "text-primary"
+            : "text-muted-foreground hover:text-foreground",
           disabled && "opacity-40 cursor-not-allowed",
         )}
       >
-        <Icon className="h-3.5 w-3.5" />
-        {label}
+        <Icon
+          className={cn(
+            "h-3.5 w-3.5 transition-transform duration-200",
+            active && "scale-110",
+          )}
+        />
+        <span className="tracking-tight">{label}</span>
+        {active && (
+          <span className="absolute inset-x-3 top-0 h-[2px] rounded-b-full bg-gradient-to-r from-transparent via-primary to-transparent" />
+        )}
       </button>
     );
   };
 
   return (
-    <nav className="flex border-t border-border bg-card/40">
+    <nav className="flex border-t border-border/70 bg-gradient-to-t from-card/60 to-card/20 backdrop-blur-sm">
       {tab("this-site", "This site", Globe, !props.hasDomain)}
       {tab("all", "All", KeyRound)}
       {tab("generator", "Generate", Sparkles)}
@@ -297,28 +305,38 @@ function EntryRow(props: {
   }, [props.expanded, details, props.entry.uuid]);
 
   return (
-    <li>
+    <li className="spm-fade-in">
       <button
         onClick={props.onToggle}
         className={cn(
-          "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors",
-          "hover:bg-accent/40",
+          "group flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-all duration-150",
+          "hover:bg-accent/40 active:bg-accent/60",
           props.expanded && "bg-accent/30",
         )}
       >
         <LetterBadge title={props.entry.title || props.entry.url || "?"} size="md" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">
+          <div className="truncate text-sm font-medium tracking-tight">
             {props.entry.title || "(untitled)"}
           </div>
-          <div className="truncate text-xs text-muted-foreground">
+          <div className="truncate text-xs text-muted-foreground/90">
             {props.entry.username || "—"}
           </div>
+        </div>
+        <div
+          className={cn(
+            "transition-transform duration-200 text-muted-foreground/60",
+            props.expanded ? "rotate-90" : "group-hover:translate-x-0.5",
+          )}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
         </div>
       </button>
 
       {props.expanded && (
-        <div className="bg-muted/30 px-3 pb-3 pt-1">
+        <div className="spm-expand bg-gradient-to-b from-muted/30 to-muted/10 px-3.5 pb-3.5 pt-2 border-y border-border/40">
           {error ? (
             <p className="px-3 py-2 text-xs text-rose-600">{error}</p>
           ) : revealing ? (
@@ -708,6 +726,8 @@ function SaveBanner(props: {
   const [title, setTitle] = useState<string>(props.pending.domain);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ↓ trigger entrance animation
+  const className = "spm-slide-in-right relative overflow-hidden border-b border-primary/30";
 
   async function save() {
     setBusy(true);
@@ -728,10 +748,14 @@ function SaveBanner(props: {
   }
 
   return (
-    <div className="border-b border-primary/40 bg-primary/5 px-3 py-3">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <Sparkles className="h-4 w-4 text-primary" />
+    <div className={className}>
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.08] via-primary/[0.04] to-transparent pointer-events-none" />
+      <div className="relative px-3.5 py-3">
+      <div className="mb-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+          <div className="flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 ring-1 ring-primary/20">
+            <Sparkles className="h-3 w-3 text-primary" />
+          </div>
           Save this login?
         </div>
         <Button
@@ -762,6 +786,7 @@ function SaveBanner(props: {
         </Button>
       </div>
       {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
+      </div>
     </div>
   );
 }
