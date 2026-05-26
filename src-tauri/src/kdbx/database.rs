@@ -21,7 +21,7 @@ pub struct Database {
 
 impl Database {
     pub fn create(path: PathBuf, password: String) -> Result<Self, DatabaseError> {
-        let secret_password = SecretString::new(password);
+        let secret_password = SecretString::new(password.into_boxed_str());
         
         // Extract database name from filename (without .kdbx extension)
         let db_name = path
@@ -61,7 +61,7 @@ impl Database {
     }
 
     pub fn open(path: PathBuf, password: String) -> Result<Self, DatabaseError> {
-        let secret_password = SecretString::new(password);
+        let secret_password = SecretString::new(password.into_boxed_str());
         
         let file = File::open(&path)
             .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;

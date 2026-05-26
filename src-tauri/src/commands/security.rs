@@ -44,7 +44,7 @@ pub async fn check_breached_passwords(state: State<'_, AppState>) -> Result<Vec<
         let mut hasher = Sha1::new();
         hasher.update(entry.password.as_bytes());
         let hash = hasher.finalize();
-        let hash_hex = format!("{:X}", hash);
+        let hash_hex: String = hash.iter().map(|b| format!("{:02X}", b)).collect();
         let prefix = hash_hex[..5].to_string();
         let suffix = hash_hex[5..].to_string();
         
@@ -61,11 +61,11 @@ pub async fn check_breached_passwords(state: State<'_, AppState>) -> Result<Vec<
     
     // Pre-generate random delays for each prefix to avoid holding non-Send RNG across await
     let delays: Vec<PrefixDelayTuple> = {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         prefix_to_entries
             .into_iter()
             .map(|(prefix, entries)| {
-                let delay_ms = rng.gen_range(50..200);
+                let delay_ms = rng.random_range(50..200);
                 (prefix, entries, delay_ms)
             })
             .collect()

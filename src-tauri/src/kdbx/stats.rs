@@ -65,7 +65,8 @@ impl Database {
                 // Hash password before using as key to avoid storing plaintext in memory
                 let mut hasher = Sha1::new();
                 hasher.update(entry.password.as_bytes());
-                let password_hash = format!("{:X}", hasher.finalize());
+                let digest = hasher.finalize();
+                let password_hash: String = digest.iter().map(|b| format!("{:02X}", b)).collect();
                 *password_counts.entry(password_hash).or_insert(0) += 1;
             }
 
