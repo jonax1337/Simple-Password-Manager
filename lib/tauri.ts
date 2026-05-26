@@ -192,3 +192,28 @@ export async function openDatabaseInNewInstance(dbPath: string): Promise<void> {
 export async function validateDatabaseFile(path: string): Promise<boolean> {
   return await invoke<boolean>("validate_database_file", { path });
 }
+
+// Browser extension setup
+
+export interface BrowserInfo {
+  id: string;
+  label: string;
+  kind: "chromium" | "firefox";
+}
+
+export interface InstallReport {
+  registered: string[];
+  failed: { label: string; reason: string }[];
+}
+
+export async function detectBrowsers(): Promise<BrowserInfo[]> {
+  return await invoke<BrowserInfo[]>("detect_browsers");
+}
+
+export async function installNativeHost(extensionId: string): Promise<InstallReport> {
+  return await invoke<InstallReport>("install_native_host", { extensionId });
+}
+
+export async function uninstallNativeHost(): Promise<string[]> {
+  return await invoke<string[]>("uninstall_native_host");
+}

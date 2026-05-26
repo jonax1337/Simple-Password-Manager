@@ -51,7 +51,7 @@ export function Popup() {
   }, [view, domain, status?.unlocked]);
 
   if (statusError) {
-    return <ErrorScreen message={statusError} />;
+    return <SetupScreen message={statusError} />;
   }
   if (!status) {
     return <LoadingScreen />;
@@ -402,6 +402,47 @@ function ErrorScreen(props: { message: string }) {
   return (
     <div className="p-4">
       <p className="text-sm text-zinc-700 dark:text-zinc-300">{props.message}</p>
+    </div>
+  );
+}
+
+// Shown when the extension can't reach the desktop app. The most common
+// cause is that the user hasn't registered the native messaging host yet,
+// so we display the extension ID prominently — they paste it into the
+// desktop app's Settings → Browser Extension card.
+function SetupScreen(props: { message: string }) {
+  const extId = chrome.runtime.id;
+  const [copied, setCopied] = useState(false);
+
+  async function copyId() {
+    await navigator.clipboard.writeText(extId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="p-4 space-y-3">
+      <p className="text-sm text-zinc-700 dark:text-zinc-300">{props.message}</p>
+      <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3">
+        <p className="text-xs text-zinc-500 mb-1">Your extension ID:</p>
+        <div className="flex items-stretch gap-1">
+          <code className="flex-1 px-2 py-1.5 text-xs bg-zinc-100 dark:bg-zinc-900 rounded font-mono break-all">
+            {extId}
+          </code>
+          <button
+            onClick={copyId}
+            className="px-2 text-xs bg-zinc-100 dark:bg-zinc-800 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700"
+          >
+            {copied ? "✓" : "Copy"}
+          </button>
+        </div>
+        <p className="text-xs text-zinc-500 mt-2 leading-relaxed">
+          Paste this ID into Simple Password Manager →{" "}
+          <strong>Settings → Application → Browser Extension</strong>, then
+          click <em>Register for all detected browsers</em>. Restart this
+          browser afterwards.
+        </p>
+      </div>
     </div>
   );
 }

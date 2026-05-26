@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw, Rocket, Download } from "lucide-react";
+import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw, Rocket, Download, Puzzle } from "lucide-react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useTheme } from "next-themes";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -25,6 +25,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
 import { getHibpEnabled, setHibpEnabled, getLiveUpdates, setLiveUpdates, getCloseToTray, setCloseToTray } from "@/lib/storage";
+import { detectBrowsers, installNativeHost, uninstallNativeHost, type BrowserInfo, type InstallReport } from "@/lib/tauri";
 
 export function Settings() {
   const { theme, setTheme } = useTheme();
@@ -36,6 +37,14 @@ export function Settings() {
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "uptodate" | "available" | "installing" | "error">("idle");
   const [updateVersion, setUpdateVersion] = useState<string>("");
   const [updateError, setUpdateError] = useState<string>("");
+  const [detectedBrowsers, setDetectedBrowsers] = useState<BrowserInfo[] | null>(null);
+  const [extensionId, setExtensionId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("browserExtensionId") ?? "";
+  });
+  const [installStatus, setInstallStatus] = useState<"idle" | "installing" | "done" | "error">("idle");
+  const [installReport, setInstallReport] = useState<InstallReport | null>(null);
+  const [installError, setInstallError] = useState<string>("");
   const [mounted, setMounted] = useState(false);
   const [currentDbPath, setCurrentDbPath] = useState<string>("");
 
@@ -52,6 +61,8 @@ export function Settings() {
     setHibpEnabledState(getHibpEnabled());
     // Load autostart state from OS
     isAutostartEnabled().then(setAutostartEnabled).catch(() => setAutostartEnabled(false));
+    // Detect browsers for the extension setup card
+    detectBrowsers().then(setDetectedBrowsers).catch(() => setDetectedBrowsers([]));
     // Load current database path
     const dbPath = localStorage.getItem("lastDatabasePath");
     if (dbPath) {
@@ -138,6 +149,41 @@ export function Settings() {
     } catch (err) {
       setUpdateError(err instanceof Error ? err.message : "Update install failed");
       setUpdateStatus("error");
+    }
+  };
+
+  const handleInstallExtension = async () => {
+    const trimmed = extensionId.trim();
+    if (!trimmed) {
+      setInstallError("Enter your extension ID first");
+      setInstallStatus("error");
+      return;
+    }
+    setInstallStatus("installing");
+    setInstallError("");
+    setInstallReport(null);
+    try {
+      localStorage.setItem("browserExtensionId", trimmed);
+      const report = await installNativeHost(trimmed);
+      setInstallReport(report);
+      setInstallStatus("done");
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : String(err));
+      setInstallStatus("error");
+    }
+  };
+
+  const handleUninstallExtension = async () => {
+    setInstallStatus("installing");
+    setInstallError("");
+    setInstallReport(null);
+    try {
+      const removed = await uninstallNativeHost();
+      setInstallReport({ registered: [], failed: removed.map((label) => ({ label, reason: "removed" })) });
+      setInstallStatus("done");
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : String(err));
+      setInstallStatus("error");
     }
   };
 
@@ -443,6 +489,89 @@ export function Settings() {
                       </Button>
                     )}
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Puzzle className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-sm font-medium">Browser Extension</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Connect Puzzle / Edge / Brave / Vivaldi / Firefox to fill saved logins
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="text-xs text-muted-foreground">
+                    {detectedBrowsers === null ? (
+                      <span>Scanning installed browsers…</span>
+                    ) : detectedBrowsers.length === 0 ? (
+                      <span>No supported browsers detected on this machine.</span>
+                    ) : (
+                      <span>
+                        Detected:{" "}
+                        {detectedBrowsers.map((b) => b.label).join(", ")}
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="extension-id" className="text-xs">
+                      Extension ID
+                    </Label>
+                    <Input
+                      id="extension-id"
+                      value={extensionId}
+                      onChange={(e) => setExtensionId(e.target.value)}
+                      placeholder="abcdefghijklmnopqrstuvwxyzabcdef"
+                      className="font-mono text-xs"
+                      spellCheck={false}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Find this at <code>chrome://extensions</code> after loading the
+                      unpacked <code>extension/dist</code> folder (or paste the ID from
+                      the Web Store listing once published).
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleInstallExtension}
+                      disabled={installStatus === "installing"}
+                    >
+                      {installStatus === "installing"
+                        ? "Working…"
+                        : "Register for all detected browsers"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleUninstallExtension}
+                      disabled={installStatus === "installing"}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  {installStatus === "done" && installReport && (
+                    <div className="text-xs space-y-1">
+                      {installReport.registered.length > 0 && (
+                        <p className="text-emerald-600 dark:text-emerald-500">
+                          Registered: {installReport.registered.join(", ")}
+                        </p>
+                      )}
+                      {installReport.failed.length > 0 && (
+                        <p className="text-amber-600 dark:text-amber-500">
+                          Skipped: {installReport.failed.map((f) => `${f.label} (${f.reason})`).join(", ")}
+                        </p>
+                      )}
+                      <p className="text-muted-foreground">
+                        Restart any open browser windows so the native host loads.
+                      </p>
+                    </div>
+                  )}
+                  {installStatus === "error" && installError && (
+                    <p className="text-xs text-rose-600">{installError}</p>
+                  )}
                 </CardContent>
               </Card>
             </div>

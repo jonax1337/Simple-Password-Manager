@@ -65,6 +65,9 @@ fn main() {
             commands::security::save_dismissed_breach,
             commands::security::get_dismissed_breaches,
             commands::security::clear_dismissed_breach,
+            commands::browser_extension::detect_browsers,
+            commands::browser_extension::install_native_host,
+            commands::browser_extension::uninstall_native_host,
         ])
         .setup(|app| {
             // Set up system tray

@@ -43,14 +43,27 @@ Copy the **extension ID** that Chrome/Edge assigns (Firefox shows a UUID).
 
 ### Register the native messaging host
 
+Two equivalent paths:
+
+**A. From inside the desktop app (recommended).** Click the extension icon
+once — the popup will show your extension ID with a Copy button. Paste it
+into the app's **Settings → Application → Browser Extension** card and
+click *Register for all detected browsers*. The app probes every
+Chromium-based browser plus Firefox on your machine and registers the
+native host for each one in a single shot.
+
+**B. From the command line.**
+
 ```bash
 cd extension
 node scripts/install-host.mjs --extension-id <id-from-browser>
+# To remove later:
+node scripts/install-host.mjs --uninstall
 ```
 
-This writes the native messaging manifest to the per-user directory each
-browser scans, and on Windows also creates the matching registry key. It
-re-runs cleanly (overwrites existing entries).
+The script auto-detects Chrome, Edge, Brave, Vivaldi, Opera, Chromium,
+Arc, and Firefox. On Windows it writes the registry key as well as the
+JSON manifest. Re-running is idempotent.
 
 Restart any open browser windows after registration.
 

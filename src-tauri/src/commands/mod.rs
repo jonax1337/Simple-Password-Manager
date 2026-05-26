@@ -1,3 +1,4 @@
+pub mod browser_extension;
 pub mod database;
 pub mod entry;
 pub mod group;
