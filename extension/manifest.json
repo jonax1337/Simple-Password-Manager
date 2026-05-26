@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Simple Password Manager",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Companion extension for Simple Password Manager — fill saved logins from your local KDBX database.",
   "permissions": [
     "tabs",
