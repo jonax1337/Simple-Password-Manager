@@ -4,6 +4,7 @@ version = "1.1.0"
 description = "A simple and secure password manager"
 authors = ["Jonas Laux"]
 edition = "2021"
+default-run = "simple-password-manager"
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
