@@ -42,7 +42,7 @@
   ::before,
   ::backdrop,
   ::file-selector-button {
-    border-color: var(--color-gray-200, currentcolor);
+    border-color: hsl(var(--border));
   }
 
   /* Neutral zinc base + indigo only as the brand accent — same palette as
