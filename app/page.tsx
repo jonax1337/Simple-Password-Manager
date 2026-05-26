@@ -9,6 +9,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { getLastDatabasePath, clearLastDatabasePath } from "@/lib/storage";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+import { useToast } from "@/components/ui/use-toast";
 
 export default function Home() {
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -16,6 +18,26 @@ export default function Home() {
   const [showQuickUnlock, setShowQuickUnlock] = useState(false);
   const [isChecking, setIsChecking] = useState(true);
   const [filePathFromAssociation, setFilePathFromAssociation] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  // Silent update check on app launch. Notify via toast if a new version is out;
+  // any failure (offline, GitHub down, misconfigured pubkey) is logged but ignored.
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const update = await checkForUpdate();
+        if (update) {
+          toast({
+            title: "Update available",
+            description: `Version ${update.version} is ready to install. Open Settings → Updates.`,
+          });
+        }
+      } catch (err) {
+        console.warn("Update check skipped:", err);
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   useEffect(() => {
     const initialize = async () => {

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use tauri::Manager;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
 use tauri::menu::{Menu, MenuItem};
+use tauri_plugin_autostart::MacosLauncher;
 
 fn main() {
     tauri::Builder::default()
@@ -18,6 +19,12 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .manage(AppState {
             database: Mutex::new(None),
             initial_file_path: Mutex::new(None),
@@ -93,17 +100,23 @@ fn main() {
                 })
                 .build(app)?;
 
-            // Handle file associations - check if app was opened with a .kdbx file
+            // Handle file associations and CLI flags from the launched process args
             let args: Vec<String> = std::env::args().collect();
-            if args.len() > 1 {
-                let file_path = &args[1];
-                if file_path.ends_with(".kdbx") {
-                    println!("Opening database from file association: {}", file_path);
-                    
-                    // Store the file path in app state so it can be retrieved by the frontend
+            let mut start_minimized = false;
+            for arg in args.iter().skip(1) {
+                if arg == "--minimized" {
+                    start_minimized = true;
+                } else if arg.ends_with(".kdbx") {
+                    println!("Opening database from file association: {}", arg);
                     if let Ok(mut initial_path) = app.state::<AppState>().initial_file_path.lock() {
-                        *initial_path = Some(file_path.clone());
+                        *initial_path = Some(arg.clone());
                     }
+                }
+            }
+
+            if start_minimized {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
                 }
             }
             Ok(())

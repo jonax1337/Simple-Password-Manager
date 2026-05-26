@@ -59,7 +59,12 @@
             "clipboard-manager:allow-clear",
             "shell:allow-open",
             "shell:allow-spawn",
-            "shell:allow-execute"
+            "shell:allow-execute",
+            "autostart:allow-enable",
+            "autostart:allow-disable",
+            "autostart:allow-is-enabled",
+            "updater:default",
+            "process:allow-restart"
           ]
         },
         {
@@ -111,6 +116,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "publisher": "Jonas Laux",
     "icon": [
@@ -154,5 +160,14 @@
       }
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/jonax1337/Simple-Password-Manager/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVBMThERDE1MjExNjYyNwpSV1FuWmhGUzBZMmhEdXVpQ2M1MUV0S3djaGYrbVZvekNpS0tQRnNtbnRUcUwveCtOTHVFd2xETgo="
+    }
+  }
 }

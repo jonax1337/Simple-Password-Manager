@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { requestCloseAllChildWindows } from "@/lib/window";
+import { getCloseToTray } from "@/lib/storage";
 
 interface UseWindowManagementProps {
   dbPath: string;
@@ -40,8 +41,8 @@ export function useWindowManagement({ dbPath, isDirty, onCloseRequested }: UseWi
     const setupCloseHandler = async () => {
       const appWindow = getCurrentWindow();
       unlisten = await appWindow.onCloseRequested(async (event) => {
-        const closeToTray = localStorage.getItem("closeToTray") === "true";
-        
+        const closeToTray = getCloseToTray();
+
         if (isDirtyRef.current) {
           event.preventDefault();
           onCloseRequested();

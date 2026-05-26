@@ -8,6 +8,8 @@ const COLUMN_WIDTHS_PREFIX = "columnWidths_";
 const HIBP_ENABLED_KEY = "hibpEnabled";
 const SEARCH_SCOPE_PREFIX = "searchScope_";
 const LIVE_UPDATES_PREFIX = "liveUpdates_";
+const CLOSE_TO_TRAY_KEY_LEGACY = "closeToTray";
+const CLOSE_TO_TRAY_KEY = "closeToTray_v2";
 
 export function saveLastDatabasePath(path: string): void {
   if (typeof window !== "undefined") {
@@ -224,6 +226,34 @@ export async function clearDismissedBreach(dbPath: string, entryUuid: string): P
     console.error("[Storage] Failed to clear dismissed breach", { error });
     // Throw generic error without sensitive details
     throw new Error("Failed to clear dismissed breach");
+  }
+}
+
+// Close-to-Tray setting.
+// Default is `true` for new users. Existing users (who used the legacy
+// `closeToTray` key) keep their previous choice — read once, migrate to v2,
+// and the legacy key is left intact for forensic clarity.
+export function getCloseToTray(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  const v2 = localStorage.getItem(CLOSE_TO_TRAY_KEY);
+  if (v2 !== null) {
+    return v2 === "true";
+  }
+  const legacy = localStorage.getItem(CLOSE_TO_TRAY_KEY_LEGACY);
+  if (legacy !== null) {
+    const migrated = legacy === "true";
+    localStorage.setItem(CLOSE_TO_TRAY_KEY, migrated.toString());
+    return migrated;
+  }
+  localStorage.setItem(CLOSE_TO_TRAY_KEY, "true");
+  return true;
+}
+
+export function setCloseToTray(enabled: boolean): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(CLOSE_TO_TRAY_KEY, enabled.toString());
   }
 }
 

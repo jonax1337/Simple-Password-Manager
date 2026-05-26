@@ -6,11 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw } from "lucide-react";
+import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw, Rocket, Download } from "lucide-react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useTheme } from "next-themes";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { emit } from "@tauri-apps/api/event";
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
+import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -21,14 +24,18 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
-import { getHibpEnabled, setHibpEnabled, getLiveUpdates, setLiveUpdates } from "@/lib/storage";
+import { getHibpEnabled, setHibpEnabled, getLiveUpdates, setLiveUpdates, getCloseToTray, setCloseToTray } from "@/lib/storage";
 
 export function Settings() {
   const { theme, setTheme } = useTheme();
   const [autoLockSeconds, setAutoLockSeconds] = useState<string>("0");
-  const [closeToTray, setCloseToTray] = useState<boolean>(false);
+  const [closeToTray, setCloseToTrayState] = useState<boolean>(true);
   const [hibpEnabled, setHibpEnabledState] = useState<boolean>(false);
   const [liveUpdatesEnabled, setLiveUpdatesEnabled] = useState<boolean>(false);
+  const [autostartEnabled, setAutostartEnabled] = useState<boolean>(false);
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "uptodate" | "available" | "installing" | "error">("idle");
+  const [updateVersion, setUpdateVersion] = useState<string>("");
+  const [updateError, setUpdateError] = useState<string>("");
   const [mounted, setMounted] = useState(false);
   const [currentDbPath, setCurrentDbPath] = useState<string>("");
 
@@ -39,11 +46,12 @@ export function Settings() {
     if (saved) {
       setAutoLockSeconds(saved);
     }
-    // Load close to tray setting
-    const closeToTraySaved = localStorage.getItem("closeToTray");
-    setCloseToTray(closeToTraySaved === "true");
+    // Load close-to-tray setting (uses v2 key, migrates legacy on read)
+    setCloseToTrayState(getCloseToTray());
     // Load HIBP setting
     setHibpEnabledState(getHibpEnabled());
+    // Load autostart state from OS
+    isAutostartEnabled().then(setAutostartEnabled).catch(() => setAutostartEnabled(false));
     // Load current database path
     const dbPath = localStorage.getItem("lastDatabasePath");
     if (dbPath) {
@@ -67,8 +75,8 @@ export function Settings() {
   };
 
   const handleCloseToTrayChange = (checked: boolean) => {
+    setCloseToTrayState(checked);
     setCloseToTray(checked);
-    localStorage.setItem("closeToTray", checked.toString());
   };
 
   const handleHibpChange = async (checked: boolean) => {
@@ -84,6 +92,52 @@ export function Settings() {
     if (confirmed) {
       await emit('hibp-setting-changed', { enabled: checked });
       await handleClose();
+    }
+  };
+
+  const handleAutostartChange = async (checked: boolean) => {
+    try {
+      if (checked) {
+        await enableAutostart();
+      } else {
+        await disableAutostart();
+      }
+      setAutostartEnabled(checked);
+    } catch {
+      // Re-read OS state in case the change partially applied
+      const actual = await isAutostartEnabled().catch(() => autostartEnabled);
+      setAutostartEnabled(actual);
+    }
+  };
+
+  const handleCheckForUpdates = async () => {
+    setUpdateStatus("checking");
+    setUpdateError("");
+    try {
+      const update = await checkForUpdate();
+      if (update) {
+        setUpdateVersion(update.version);
+        setUpdateStatus("available");
+      } else {
+        setUpdateStatus("uptodate");
+      }
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : "Update check failed");
+      setUpdateStatus("error");
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateStatus("installing");
+    try {
+      const update = await checkForUpdate();
+      if (update) {
+        await update.downloadAndInstall();
+        await relaunch();
+      }
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : "Update install failed");
+      setUpdateStatus("error");
     }
   };
 
@@ -321,6 +375,73 @@ export function Settings() {
                       checked={closeToTray}
                       onCheckedChange={handleCloseToTrayChange}
                     />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Rocket className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-sm font-medium">Startup</CardTitle>
+                  </div>
+                  <CardDescription>Launch with your operating system</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="autostart" className="text-sm">Start with system</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Launches minimized to the system tray
+                      </p>
+                    </div>
+                    <Switch
+                      id="autostart"
+                      checked={autostartEnabled}
+                      onCheckedChange={handleAutostartChange}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Download className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-sm font-medium">Updates</CardTitle>
+                  </div>
+                  <CardDescription>Check for new versions on GitHub</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-0.5 min-w-0">
+                      <p className="text-sm">
+                        {updateStatus === "idle" && "Click to check for the latest release."}
+                        {updateStatus === "checking" && "Checking for updates…"}
+                        {updateStatus === "uptodate" && "You're on the latest version."}
+                        {updateStatus === "available" && `Version ${updateVersion} is available.`}
+                        {updateStatus === "installing" && "Downloading and installing…"}
+                        {updateStatus === "error" && "Update check failed."}
+                      </p>
+                      {updateStatus === "error" && updateError && (
+                        <p className="text-xs text-amber-600 dark:text-amber-500 truncate">{updateError}</p>
+                      )}
+                    </div>
+                    {updateStatus === "available" && (
+                      <Button size="sm" onClick={handleInstallUpdate}>
+                        Install &amp; restart
+                      </Button>
+                    )}
+                    {updateStatus !== "available" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleCheckForUpdates}
+                        disabled={updateStatus === "checking" || updateStatus === "installing"}
+                      >
+                        Check now
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>

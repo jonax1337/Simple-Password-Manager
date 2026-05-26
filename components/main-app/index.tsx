@@ -14,7 +14,7 @@ import type { GroupData, EntryData } from "@/lib/tauri";
 import { loadGroupTreeState } from "@/lib/group-state";
 import { ResizablePanel } from "@/components/ResizablePanel";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getSearchScope, saveSearchScope, getLiveUpdates } from "@/lib/storage";
+import { getSearchScope, saveSearchScope, getLiveUpdates, getCloseToTray } from "@/lib/storage";
 import {
   DndContext,
   DragOverlay,
@@ -468,8 +468,7 @@ export function MainApp({ onClose }: MainAppProps) {
     
     if (closeAction === 'window') {
       const appWindow = getCurrentWindow();
-      const closeToTray = localStorage.getItem("closeToTray") === "true";
-      if (closeToTray) {
+      if (getCloseToTray()) {
         await appWindow.hide();
       } else {
         await appWindow.close();
@@ -477,17 +476,17 @@ export function MainApp({ onClose }: MainAppProps) {
     } else if (closeAction === 'logout') {
       await performClose(true);
     }
-    
+
     setCloseAction(null);
   };
 
   const handleUnsavedSave = async () => {
     setShowUnsavedDialog(false);
     await handleSave();
-    
+
     if (closeAction === 'window') {
       const appWindow = getCurrentWindow();
-      const closeToTray = localStorage.getItem("closeToTray") === "true";
+      const closeToTray = getCloseToTray();
       if (closeToTray) {
         await appWindow.hide();
       } else {

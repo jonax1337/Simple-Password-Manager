@@ -2,6 +2,9 @@ name: Create Release
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -48,6 +51,9 @@ jobs:
       run: npm ci
 
     - name: Build Tauri App
+      env:
+        TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       run: npm run tauri:build
 
     - name: Upload artifacts
@@ -118,28 +124,67 @@ jobs:
       
       - name: Create GitHub Release
         run: |
-          # Find only the actual installer files we want to upload
+          # Upload installers (.exe/.msi/.deb/.AppImage/.dmg/.rpm) and the .sig
+          # signature files the updater plugin needs to verify downloads.
           find ./artifacts -type f \( \
             -name "*.msi" -o \
             -name "*.exe" -o \
             -name "*.deb" -o \
             -name "*.AppImage" -o \
             -name "*.dmg" -o \
-            -name "*.rpm" \
+            -name "*.rpm" -o \
+            -name "*.sig" \
           \) -print0 | xargs -0 -I {} echo "{}"
-          
-          # Create release with files
+
           find ./artifacts -type f \( \
             -name "*.msi" -o \
             -name "*.exe" -o \
             -name "*.deb" -o \
             -name "*.AppImage" -o \
             -name "*.dmg" -o \
-            -name "*.rpm" \
+            -name "*.rpm" -o \
+            -name "*.sig" \
           \) -print0 | xargs -0 gh release create ${{ steps.version.outputs.version }} \
             --title "Password Manager ${{ steps.version.outputs.version }}" \
             --notes "Release ${{ steps.version.outputs.version }}" \
             --draft=false \
             --prerelease=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build updater manifest (latest.json)
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_NUM="${VERSION#v}"
+          REPO="${GITHUB_REPOSITORY}"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          win_exe=$(find ./artifacts/windows -type f -name "*-setup.exe" | head -n1)
+          win_sig=$(find ./artifacts/windows -type f -name "*-setup.exe.sig" | head -n1)
+
+          if [ -z "$win_exe" ] || [ -z "$win_sig" ]; then
+            echo "Could not locate signed Windows installer + .sig; skipping latest.json" >&2
+            exit 0
+          fi
+
+          win_signature=$(cat "$win_sig")
+          win_url="https://github.com/$REPO/releases/download/$VERSION/$(basename "$win_exe")"
+
+          cat > latest.json <<EOF
+          {
+            "version": "$VERSION_NUM",
+            "notes": "See the GitHub release for details.",
+            "pub_date": "$PUB_DATE",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "$win_signature",
+                "url": "$win_url"
+              }
+            }
+          }
+          EOF
+
+          gh release upload "$VERSION" latest.json --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
