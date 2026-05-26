@@ -31,11 +31,11 @@ pub fn generate_password(
     }
 
     let charset_vec: Vec<char> = charset.chars().collect();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let password: String = (0..length)
         .map(|_| {
-            let idx = rng.gen_range(0..charset_vec.len());
+            let idx = rng.random_range(0..charset_vec.len());
             charset_vec[idx]
         })
         .collect();
