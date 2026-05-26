@@ -158,7 +158,7 @@ export function Settings() {
     <div className="flex h-screen flex-col bg-background">
       <CustomTitleBar title="Settings" hideMaximize />
       {/* Header */}
-      <div className="flex-shrink-0 flex items-center gap-3 border-b px-4 py-3 bg-muted/30">
+      <div className="shrink-0 flex items-center gap-3 border-b px-4 py-3 bg-muted/30">
         <div className="h-10 w-10 flex items-center justify-center rounded-md bg-primary/10">
           <SettingsIcon className="h-5 w-5 text-primary" />
         </div>
@@ -169,7 +169,7 @@ export function Settings() {
       </div>
 
       <Tabs defaultValue="appearance" className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <TabsList className="flex-shrink-0 w-full justify-start rounded-none border-b bg-transparent p-0 h-auto">
+        <TabsList className="shrink-0 w-full justify-start rounded-none border-b bg-transparent p-0 h-auto">
           <TabsTrigger value="appearance" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">
             Appearance
           </TabsTrigger>
@@ -206,7 +206,7 @@ export function Settings() {
                           : "border-transparent bg-muted/50 hover:bg-muted"
                       }`}
                     >
-                      <div className="h-10 w-10 rounded-full bg-white border shadow-sm flex items-center justify-center">
+                      <div className="h-10 w-10 rounded-full bg-white border shadow-xs flex items-center justify-center">
                         <Sun className="h-5 w-5 text-yellow-500" />
                       </div>
                       <span className="text-sm font-medium">Light</span>
@@ -232,7 +232,7 @@ export function Settings() {
                           : "border-transparent bg-muted/50 hover:bg-muted"
                       }`}
                     >
-                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-white to-slate-900 border flex items-center justify-center">
+                      <div className="h-10 w-10 rounded-full bg-linear-to-br from-white to-slate-900 border flex items-center justify-center">
                         <Monitor className="h-5 w-5 text-slate-500" />
                       </div>
                       <span className="text-sm font-medium">System</span>

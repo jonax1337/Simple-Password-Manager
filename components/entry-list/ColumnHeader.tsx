@@ -151,7 +151,7 @@ export function ColumnHeader({
       <ContextMenuTrigger>
         <div className="sticky top-0 z-10 flex items-center border-b bg-muted/50 text-xs font-semibold text-muted-foreground">
           {/* Fixed left section */}
-          <div className="flex items-center gap-1 px-4 py-2 flex-shrink-0">
+          <div className="flex items-center gap-1 px-4 py-2 shrink-0">
             <div className="w-4"></div>
             <div className="w-8 flex items-center justify-center">
               <Checkbox
@@ -179,12 +179,12 @@ export function ColumnHeader({
                     <span className="truncate">{col.label}</span>
                     {currentSort.column === col.id ? (
                       currentSort.direction === 'asc' ? (
-                        <ArrowUp className="h-3 w-3 flex-shrink-0" />
+                        <ArrowUp className="h-3 w-3 shrink-0" />
                       ) : (
-                        <ArrowDown className="h-3 w-3 flex-shrink-0" />
+                        <ArrowDown className="h-3 w-3 shrink-0" />
                       )
                     ) : (
-                      <ArrowUpDown className="h-3 w-3 opacity-30 flex-shrink-0" />
+                      <ArrowUpDown className="h-3 w-3 opacity-30 shrink-0" />
                     )}
                   </button>
                   <div

@@ -31,7 +31,7 @@ export function EntryListHeader({
               <div key={index} className="flex items-center gap-1.5">
                 <span className="truncate">{segment}</span>
                 {index < array.length - 1 && (
-                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 )}
               </div>
             ))}
@@ -42,18 +42,18 @@ export function EntryListHeader({
         </span>
       </div>
       {isSearching && selectedGroupName === "Favorites" ? (
-        <div className="h-7 w-7 flex items-center justify-center flex-shrink-0">
+        <div className="h-7 w-7 flex items-center justify-center shrink-0">
           <Star className="h-4 w-4 text-muted-foreground" />
         </div>
       ) : isSearching ? (
-        <div className="h-7 w-7 flex items-center justify-center flex-shrink-0">
+        <div className="h-7 w-7 flex items-center justify-center shrink-0">
           <Search className="h-4 w-4 text-muted-foreground" />
         </div>
       ) : groupUuid && (
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 flex-shrink-0"
+          className="h-7 w-7 shrink-0"
           onClick={onCreateClick}
         >
           <Plus className="h-4 w-4" />

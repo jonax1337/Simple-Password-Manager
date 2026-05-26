@@ -46,7 +46,7 @@ export function SearchHeader({
 
   return (
     <div 
-      className={`bg-background/95 backdrop-blur-sm border-b px-6 transition-all duration-300 ease-in-out overflow-hidden ${
+      className={`bg-background/95 backdrop-blur-xs border-b px-6 transition-all duration-300 ease-in-out overflow-hidden ${
         isVisible ? 'py-3 max-h-24' : 'py-0 max-h-0 border-b-0'
       }`}
     >
