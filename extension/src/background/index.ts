@@ -12,7 +12,10 @@ import {
   type BgMessage,
   type BgResponse,
   type BridgeInfo,
+  type CaptureMessage,
 } from "../common/bridge";
+
+const PENDING_CAPTURE_KEY = "pending_capture";
 
 let cached: BridgeInfo | null = null;
 let cacheLoadedAt = 0;
@@ -115,8 +118,10 @@ async function doFetch<T>(
   }
 }
 
+type IncomingMessage = BgMessage | CaptureMessage;
+
 chrome.runtime.onMessage.addListener(
-  (msg: BgMessage, _sender, sendResponse) => {
+  (msg: IncomingMessage, _sender, sendResponse) => {
     (async () => {
       try {
         if (msg.kind === "get-bridge") {
@@ -125,6 +130,9 @@ chrome.runtime.onMessage.addListener(
         } else if (msg.kind === "fetch") {
           const resp = await doFetch(msg.method, msg.path, msg.body);
           sendResponse(resp);
+        } else if (msg.kind === "capture") {
+          await handleCapture(msg);
+          sendResponse({ ok: true });
         } else {
           sendResponse({ ok: false, error: "unknown message kind" });
         }
@@ -132,6 +140,55 @@ chrome.runtime.onMessage.addListener(
         sendResponse({ ok: false, error: (e as Error).message });
       }
     })();
-    return true; // signals "I will respond async"
+    return true;
   },
 );
+
+// Stash a captured login in session storage so the popup can pick it up on
+// next open. Also paint a "+" badge on the extension icon so the user knows
+// something's waiting.
+async function handleCapture(msg: CaptureMessage): Promise<void> {
+  await chrome.storage.session.set({
+    [PENDING_CAPTURE_KEY]: {
+      domain: msg.domain,
+      url: msg.url,
+      username: msg.username,
+      password: msg.password,
+      capturedAt: Date.now(),
+    },
+  });
+  await setBadge("+");
+}
+
+async function setBadge(text: string): Promise<void> {
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color: "#6366f1" });
+    await chrome.action.setBadgeText({ text });
+  } catch {
+    /* MV3 minor api drift; nothing actionable here */
+  }
+}
+
+// Clear the badge whenever the popup empties the pending capture.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "session") return;
+  if (!(PENDING_CAPTURE_KEY in changes)) return;
+  const newValue = changes[PENDING_CAPTURE_KEY]?.newValue;
+  if (newValue === undefined) {
+    void setBadge("");
+  }
+});
+
+// On install / start-up, make sure the badge reflects whatever was already
+// stashed in storage. Service workers can be re-spawned cold.
+async function restoreBadge() {
+  const v = await chrome.storage.session.get(PENDING_CAPTURE_KEY);
+  if (v?.[PENDING_CAPTURE_KEY]) {
+    void setBadge("+");
+  } else {
+    void setBadge("");
+  }
+}
+chrome.runtime.onStartup.addListener(restoreBadge);
+chrome.runtime.onInstalled.addListener(restoreBadge);
+void restoreBadge();

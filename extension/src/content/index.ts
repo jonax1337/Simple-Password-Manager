@@ -1,29 +1,133 @@
-// Content script: runs on every page, listens for fill requests from the
-// popup, and writes the credentials into the most likely login form on
-// the active document.
+// Content script: runs on every page.
+//
+// Two jobs:
+//   1. Form-fill on demand (popup sends a "fill" message with credentials).
+//   2. Capture submitted logins — listen for form submits and Enter-keypress
+//      inside password fields, harvest the values, ship them off to the
+//      background worker so the popup can offer "Save this login?" on next
+//      open.
 
-interface FillRequest {
+interface FillMessage {
   kind: "fill";
   username: string;
   password: string;
 }
 
-interface FillResponse {
-  filled: { username: boolean; password: boolean };
+interface CaptureMessage {
+  kind: "capture";
+  domain: string;
+  url: string;
+  username: string;
+  password: string;
 }
 
+// ---------------- fill on demand ----------------
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if ((msg as FillRequest)?.kind !== "fill") return false;
-  const { username, password } = msg as FillRequest;
+  if ((msg as FillMessage)?.kind !== "fill") return false;
+  const { username, password } = msg as FillMessage;
   const result = fillCurrentForm(username, password);
-  sendResponse(result satisfies FillResponse);
-  return false; // synchronous response, no need to keep the port open
+  sendResponse(result);
+  return false;
 });
 
-function fillCurrentForm(
-  username: string,
-  password: string,
-): FillResponse {
+// ---------------- capture on submit ----------------
+
+// To avoid double-captures we throttle by hash of (origin, username, password).
+let lastSentHash: string | null = null;
+let lastSentAt = 0;
+
+function maybeCaptureFromActiveForm() {
+  const passwordField = findPasswordField();
+  if (!passwordField || !passwordField.value) return;
+  const usernameField = findUsernameField(passwordField);
+
+  const username = usernameField?.value ?? "";
+  const password = passwordField.value;
+  // Only send if there's actually something to save.
+  if (!password) return;
+
+  const url = window.location.href;
+  let domain = window.location.hostname;
+  try {
+    domain = new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    /* keep raw hostname */
+  }
+
+  const hash = `${domain}|${username}|${password}`;
+  const now = Date.now();
+  if (hash === lastSentHash && now - lastSentAt < 5000) return;
+  lastSentHash = hash;
+  lastSentAt = now;
+
+  const payload: CaptureMessage = {
+    kind: "capture",
+    domain,
+    url,
+    username,
+    password,
+  };
+  chrome.runtime.sendMessage(payload).catch(() => {
+    /* background may be inactive — capture survives via .session storage */
+  });
+}
+
+// Capture on every form submission that has a password field.
+document.addEventListener(
+  "submit",
+  (event) => {
+    const form = event.target as HTMLElement | null;
+    if (!(form instanceof HTMLFormElement)) return;
+    if (!form.querySelector("input[type=password]")) return;
+    // Capture synchronously *before* the form posts away — but don't block.
+    queueMicrotask(maybeCaptureFromActiveForm);
+  },
+  true, // capture phase, so we run before the form may detach
+);
+
+// Many modern SPA login forms use a button click + fetch instead of a real
+// <form>. As a fallback, capture on Enter in a password field, and on any
+// click on a button whose visible text smells like "log in"/"sign in".
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "Enter") return;
+    const target = event.target as HTMLElement | null;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.type !== "password") return;
+    queueMicrotask(maybeCaptureFromActiveForm);
+  },
+  true,
+);
+
+document.addEventListener(
+  "click",
+  (event) => {
+    const el = event.target as HTMLElement | null;
+    if (!el) return;
+    const btn = el.closest("button, [role=button], input[type=submit]");
+    if (!btn) return;
+    const label = (
+      (btn as HTMLElement).innerText ??
+      btn.getAttribute("aria-label") ??
+      btn.getAttribute("value") ??
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    if (!label) return;
+    if (!/log\s*in|sign\s*in|sign\s*up|continue|submit|anmelden|einloggen|registrieren/.test(label)) {
+      return;
+    }
+    queueMicrotask(maybeCaptureFromActiveForm);
+  },
+  true,
+);
+
+// ---------------- fill implementation ----------------
+
+function fillCurrentForm(username: string, password: string) {
   const passwordField = findPasswordField();
   const usernameField = findUsernameField(passwordField);
 
@@ -41,21 +145,15 @@ function fillCurrentForm(
   return { filled };
 }
 
-// Find the most likely password input — visible, type=password, biggest if multiple.
 function findPasswordField(): HTMLInputElement | null {
   const candidates = Array.from(
     document.querySelectorAll<HTMLInputElement>("input[type=password]"),
   ).filter(isVisible);
-
   if (candidates.length === 0) return null;
-  // Heuristic: largest visible password field wins (handles double "confirm
-  // password" forms by preferring the bigger / first one).
   candidates.sort((a, b) => boundingArea(b) - boundingArea(a));
   return candidates[0];
 }
 
-// Find the username/email field — usually the first visible text-like input
-// before the password field in DOM order.
 function findUsernameField(
   passwordField: HTMLInputElement | null,
 ): HTMLInputElement | null {
@@ -63,13 +161,8 @@ function findUsernameField(
     document.querySelectorAll<HTMLInputElement>("input"),
   ).filter(isVisible);
 
-  // Build the ordered list of inputs that come before the password field;
-  // if there's no password field, use all of them.
   const beforePassword = passwordField
-    ? all.slice(
-        0,
-        all.findIndex((el) => el === passwordField),
-      )
+    ? all.slice(0, all.findIndex((el) => el === passwordField))
     : all;
 
   const textLike = beforePassword.filter((el) => {
@@ -83,8 +176,6 @@ function findUsernameField(
     );
   });
 
-  // Prefer email > text by autocomplete/name hint, otherwise last text input
-  // before password.
   const hinted = textLike.find((el) => {
     const hay = [
       el.autocomplete,
@@ -116,9 +207,6 @@ function boundingArea(el: HTMLElement): number {
   return r.width * r.height;
 }
 
-// Setting `.value` directly skips React's controlled-input synthetic event
-// machinery — frameworks won't see the change. Use the native property
-// setter and dispatch an input event so React et al. pick it up.
 function setNativeValue(el: HTMLInputElement, value: string) {
   const proto = Object.getPrototypeOf(el);
   const descriptor = Object.getOwnPropertyDescriptor(proto, "value");

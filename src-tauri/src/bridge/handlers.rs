@@ -140,6 +140,94 @@ pub async fn entry_password(
     }
 }
 
+// ---------- POST /v1/entries ----------
+//
+// Creates a new entry from a captured browser login and persists the
+// database to disk so the change survives a desktop-app restart.
+
+#[derive(Deserialize)]
+pub struct CreateEntryRequest {
+    pub title: String,
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub notes: String,
+}
+
+#[derive(Serialize)]
+pub struct CreateEntryResponse {
+    pub uuid: String,
+    pub title: String,
+    pub group_uuid: String,
+}
+
+pub async fn create_entry(
+    State(state): State<BridgeState>,
+    Json(req): Json<CreateEntryRequest>,
+) -> Result<Json<CreateEntryResponse>, StatusCode> {
+    if req.password.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let title = if req.title.trim().is_empty() {
+        req.url.clone()
+    } else {
+        req.title.clone()
+    };
+
+    let mut guard = state
+        .db_handle
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = guard.as_mut().ok_or(StatusCode::LOCKED)?;
+
+    let root_uuid = db.get_root_group().uuid;
+
+    let entry_data = crate::kdbx::EntryData {
+        uuid: String::new(),
+        title: title.clone(),
+        username: req.username,
+        password: req.password,
+        url: req.url,
+        notes: req.notes,
+        tags: String::new(),
+        group_uuid: root_uuid.clone(),
+        icon_id: None,
+        is_favorite: false,
+        created: None,
+        modified: None,
+        last_accessed: None,
+        expiry_time: None,
+        expires: false,
+        usage_count: 0,
+        custom_fields: Vec::new(),
+        history: Vec::new(),
+    };
+
+    db.create_entry(entry_data)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.save()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // create_entry doesn't surface the assigned uuid, so grab the most
+    // recently modified entry in the root group — that's the one we just
+    // inserted (modified timestamp is set in convert flow).
+    let created = db
+        .get_all_entries()
+        .into_iter()
+        .filter(|e| e.group_uuid == root_uuid)
+        .max_by_key(|e| e.modified.clone().unwrap_or_default())
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(CreateEntryResponse {
+        uuid: created.uuid,
+        title,
+        group_uuid: root_uuid,
+    }))
+}
+
 // ---------- POST /v1/password/generate ----------
 
 #[derive(Deserialize)]

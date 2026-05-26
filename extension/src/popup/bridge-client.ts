@@ -4,6 +4,7 @@
 import type {
   BgMessage,
   BgResponse,
+  CreateEntryResult,
   EntrySummary,
   PasswordResult,
   StatusResult,
@@ -67,5 +68,24 @@ export async function generatePassword(
     method: "POST",
     path: "/v1/password/generate",
     body: opts,
+  });
+}
+
+export interface NewEntryInput {
+  title: string;
+  username: string;
+  password: string;
+  url: string;
+  notes?: string;
+}
+
+export async function createEntry(
+  input: NewEntryInput,
+): Promise<BgResponse<CreateEntryResult>> {
+  return send<CreateEntryResult>({
+    kind: "fetch",
+    method: "POST",
+    path: "/v1/entries",
+    body: input,
   });
 }

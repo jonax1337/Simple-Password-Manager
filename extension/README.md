@@ -111,11 +111,26 @@ extension/
 - A future revision will gate every entry behind an in-app "approve domain"
   prompt the first time a new domain asks.
 
+## Save-on-submit flow
+
+When you submit a login form on any page, the content script captures the
+filled-in username + password, the background worker stashes them in
+`chrome.storage.session`, and the extension icon gets a `+` badge. Open the
+popup and a "Save this login?" banner sits at the top — pre-filled with
+domain, username, and the captured password. Click *Save to vault* and the
+desktop app writes a new entry to the root group and persists the database
+to disk.
+
+Heuristics: capture fires on real `<form>` submissions, on Enter inside a
+password field, and on clicks of buttons whose label matches "log in / sign
+in / sign up / submit / anmelden / einloggen / registrieren". Adjust in
+`src/content/index.ts` if a site you use doesn't trigger it.
+
 ## Known gaps (will land in 3.x follow-ups)
 
-- No auto-detection of saves — if you sign up somewhere, the extension does
-  not yet offer to save the credentials. Use the desktop app.
 - No TOTP integration.
 - No HTTP Basic Auth interception.
 - No per-domain approval — currently any entry whose URL matches the active
   domain is returned to the extension on request.
+- Saved entries always land in the root group; choosing a destination group
+  from the popup is not yet implemented (move it later in the desktop app).

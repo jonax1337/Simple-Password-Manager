@@ -1,12 +1,102 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Same design tokens as the desktop app — the popup feels native */
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
 
 @layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  :root {
+    --background: 250 60% 98%;
+    --foreground: 250 35% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 250 35% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 250 35% 15%;
+    --primary: 250 55% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 250 50% 90%;
+    --secondary-foreground: 250 55% 35%;
+    --muted: 250 40% 95%;
+    --muted-foreground: 250 20% 45%;
+    --accent: 250 60% 92%;
+    --accent-foreground: 250 55% 40%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 250 35% 88%;
+    --input: 250 35% 88%;
+    --ring: 250 55% 50%;
+    --radius: 0.5rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: 250 40% 8%;
+      --foreground: 250 30% 95%;
+      --card: 250 35% 12%;
+      --card-foreground: 250 30% 95%;
+      --popover: 250 35% 12%;
+      --popover-foreground: 250 30% 95%;
+      --primary: 250 50% 65%;
+      --primary-foreground: 250 40% 10%;
+      --secondary: 250 35% 18%;
+      --secondary-foreground: 250 30% 95%;
+      --muted: 250 30% 20%;
+      --muted-foreground: 250 20% 65%;
+      --accent: 250 35% 22%;
+      --accent-foreground: 250 40% 85%;
+      --destructive: 0 62.8% 50%;
+      --destructive-foreground: 0 0% 100%;
+      --border: 250 30% 25%;
+      --input: 250 30% 25%;
+      --ring: 250 50% 60%;
+    }
+  }
+
   html,
   body {
     width: 360px;
-    min-height: 200px;
+    min-height: 240px;
     margin: 0;
     font-family:
       -apple-system,
@@ -15,16 +105,31 @@
       "Helvetica Neue",
       Arial,
       sans-serif;
-    font-size: 14px;
+    font-size: 13px;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
   }
-  body {
-    background: #fafafa;
-    color: #18181b;
+
+  /* Subtle scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
   }
-  @media (prefers-color-scheme: dark) {
-    body {
-      background: #0b0b0c;
-      color: #e4e4e7;
-    }
+  ::-webkit-scrollbar-track {
+    background: transparent;
   }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
+}
+
+/* Bring all of the v4 utility tokens onto the body so any class that derives
+ * from `--color-*` (e.g. text-foreground) resolves immediately. */
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
 }

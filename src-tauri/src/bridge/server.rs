@@ -72,7 +72,10 @@ fn router(state: BridgeState) -> Router {
 
     Router::new()
         .route("/v1/status", get(handlers::status))
-        .route("/v1/entries", get(handlers::list_entries))
+        .route(
+            "/v1/entries",
+            get(handlers::list_entries).post(handlers::create_entry),
+        )
         .route("/v1/entries/{id}/password", get(handlers::entry_password))
         .route("/v1/password/generate", post(handlers::generate_password))
         .layer(middleware::from_fn_with_state(

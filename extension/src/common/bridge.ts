@@ -30,6 +30,20 @@ export interface StatusResult {
   version: string;
 }
 
+export interface CreateEntryResult {
+  uuid: string;
+  title: string;
+  group_uuid: string;
+}
+
+export interface CaptureMessage {
+  kind: "capture";
+  domain: string;
+  url: string;
+  username: string;
+  password: string;
+}
+
 /** Background-script message envelope. */
 export type BgMessage =
   | { kind: "get-bridge"; force?: boolean }
