@@ -98,3 +98,7 @@ export async function createEntry(
     body: input,
   });
 }
+
+export async function focusApp(): Promise<BgResponse<unknown>> {
+  return send<unknown>({ kind: "fetch", method: "POST", path: "/v1/focus-app" });
+}

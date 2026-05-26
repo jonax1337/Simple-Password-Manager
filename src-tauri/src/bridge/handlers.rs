@@ -337,6 +337,32 @@ pub async fn generate_password(
     Ok(Json(GeneratePasswordResponse { password }))
 }
 
+// ---------- POST /v1/focus-app ----------
+//
+// Brings the desktop window to the foreground so the user can land on the
+// unlock screen without having to find the app themselves. Used by the
+// extension when it sees a locked database but the current site has saved
+// entries — 1Password-style "click Unlock to flip to the app".
+
+pub async fn focus_app(State(state): State<BridgeState>) -> StatusCode {
+    use tauri::Manager;
+
+    let Some(window) = state.app_handle.get_webview_window("main") else {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    };
+
+    let _ = window.unminimize();
+    let _ = window.show();
+    // Windows can refuse focus-steal from a non-foreground process unless
+    // we toggle always-on-top briefly. This is what most "bring window to
+    // front" helpers do and matches the behaviour KeePassXC uses.
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+    let _ = window.set_always_on_top(false);
+
+    StatusCode::OK
+}
+
 // ---------- helpers ----------
 
 // Run a closure with a live `&Database` reference, returning 423 Locked when

@@ -153,10 +153,10 @@ fn main() {
 }
 
 async fn launch_bridge(
-    _app_handle: tauri::AppHandle,
+    app_handle: tauri::AppHandle,
     db_handle: state::DatabaseHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let bridge_file = bridge::start(db_handle).await?;
+    let bridge_file = bridge::start(db_handle, app_handle).await?;
 
     let dir = bridge::bridge_state_dir()
         .ok_or("could not determine local data dir for bridge.json")?;

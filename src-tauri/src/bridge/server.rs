@@ -20,17 +20,22 @@ use crate::state::DatabaseHandle;
 pub struct BridgeState {
     pub token: Arc<String>,
     pub db_handle: DatabaseHandle,
+    pub app_handle: tauri::AppHandle,
 }
 
 /// Boots the HTTP server on 127.0.0.1 with an OS-chosen port. The server
 /// runs until the process exits — there is no explicit shutdown, the OS
 /// reaps the socket when the Tauri app terminates, and the bridge.json
 /// cleanup in main.rs handles state.
-pub async fn start(db_handle: DatabaseHandle) -> std::io::Result<BridgeFile> {
+pub async fn start(
+    db_handle: DatabaseHandle,
+    app_handle: tauri::AppHandle,
+) -> std::io::Result<BridgeFile> {
     let token = super::auth::generate_token();
     let state = BridgeState {
         token: Arc::new(token.clone()),
         db_handle,
+        app_handle,
     };
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -79,6 +84,7 @@ fn router(state: BridgeState) -> Router {
         .route("/v1/entries/{id}/password", get(handlers::entry_password))
         .route("/v1/entries/{id}/totp", get(handlers::entry_totp))
         .route("/v1/password/generate", post(handlers::generate_password))
+        .route("/v1/focus-app", post(handlers::focus_app))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer_token,

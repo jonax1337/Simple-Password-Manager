@@ -19,6 +19,7 @@ import {
   fetchPassword,
   fetchStatus,
   fetchTotp,
+  focusApp,
   generatePassword,
 } from "./bridge-client";
 import { useActiveDomain } from "./useActiveDomain";
@@ -86,7 +87,7 @@ export function Popup() {
 
   if (statusError) return <SetupScreen message={statusError} />;
   if (!status) return <LoadingScreen />;
-  if (!status.unlocked) return <LockedScreen />;
+  if (!status.unlocked) return <LockedScreen domain={domain} />;
 
   const filtered =
     entries?.filter((e) => {
@@ -776,18 +777,40 @@ function LoadingScreen() {
   );
 }
 
-function LockedScreen() {
+function LockedScreen(props: { domain: string | null }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function unlock() {
+    setBusy(true);
+    setError(null);
+    const res = await focusApp();
+    setBusy(false);
+    if (res.ok) {
+      // Close the popup so Chrome doesn't steal focus back.
+      window.close();
+    } else {
+      setError(res.error ?? "Could not bring the app to the front");
+    }
+  }
+
   return (
-    <div className="flex flex-col items-center gap-3 p-6 text-center">
+    <div className="flex flex-col items-center gap-4 p-6 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
         <Lock className="h-5 w-5 text-primary" />
       </div>
       <div>
         <div className="text-sm font-medium">Database locked</div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Open Simple Password Manager and unlock your database to use this extension.
+        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+          {props.domain
+            ? `Unlock Simple Password Manager to autofill on ${props.domain}.`
+            : "Unlock Simple Password Manager to use this extension."}
         </p>
       </div>
+      <Button onClick={unlock} disabled={busy} className="w-full">
+        {busy ? "Bringing app to the front…" : "Open & unlock"}
+      </Button>
+      {error && <p className="text-xs text-rose-600">{error}</p>}
     </div>
   );
 }
