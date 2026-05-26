@@ -372,6 +372,7 @@ function TotpField(props: { entryUuid: string }) {
     | undefined
     | { code: string; period: number; expiresAt: number }
   >(null);
+  const [totpError, setTotpError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -387,8 +388,19 @@ function TotpField(props: { entryUuid: string }) {
           period: res.data.period,
           expiresAt: Date.now() + res.data.remaining_seconds * 1000,
         });
+        setTotpError(null);
       } else if (res.status === 404) {
+        // No TOTP configured — silently hide.
         setTotp(undefined);
+        setTotpError(null);
+      } else if (res.status === 422) {
+        setTotp(undefined);
+        setTotpError(
+          "Stored 2FA value is malformed. Open the entry in the app and re-add your TOTP secret.",
+        );
+      } else {
+        setTotp(undefined);
+        setTotpError(res.error ?? "Could not read 2FA code");
       }
     }
     void load();
@@ -420,6 +432,16 @@ function TotpField(props: { entryUuid: string }) {
     });
   }, [tick, totp, props.entryUuid]);
 
+  if (totpError) {
+    return (
+      <div>
+        <Label className="mb-1 block">One-time code</Label>
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+          {totpError}
+        </p>
+      </div>
+    );
+  }
   if (totp === null || totp === undefined) return null;
   const current = totp;
   const remaining = Math.max(0, Math.ceil((current.expiresAt - Date.now()) / 1000));

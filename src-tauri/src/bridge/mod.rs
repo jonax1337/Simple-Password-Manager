@@ -10,7 +10,6 @@
 mod auth;
 mod handlers;
 mod server;
-mod totp;
 
 pub use auth::{remove_bridge_file, write_bridge_file};
 pub use server::start;

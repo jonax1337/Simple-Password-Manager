@@ -148,9 +148,9 @@ pub async fn entry_totp(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let result = if raw.starts_with("otpauth://") {
-        super::totp::from_otpauth_uri(&raw)
+        crate::totp::from_otpauth_uri(&raw)
     } else {
-        super::totp::from_raw_secret(&raw)
+        crate::totp::from_raw_secret(&raw)
     }
     .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
 

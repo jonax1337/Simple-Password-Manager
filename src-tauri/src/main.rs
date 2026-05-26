@@ -5,6 +5,7 @@ mod bridge;
 mod commands;
 mod kdbx;
 mod state;
+mod totp;
 
 use state::AppState;
 use std::sync::{Arc, Mutex};
@@ -68,6 +69,7 @@ fn main() {
             commands::browser_extension::detect_browsers,
             commands::browser_extension::install_native_host,
             commands::browser_extension::uninstall_native_host,
+            commands::totp::preview_totp,
         ])
         .setup(|app| {
             // Set up system tray

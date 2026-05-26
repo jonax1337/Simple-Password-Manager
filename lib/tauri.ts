@@ -217,3 +217,17 @@ export async function installNativeHost(extensionId: string): Promise<InstallRep
 export async function uninstallNativeHost(): Promise<string[]> {
   return await invoke<string[]>("uninstall_native_host");
 }
+
+// TOTP helpers
+
+export interface TotpPreview {
+  code: string;
+  period: number;
+  remaining_seconds: number;
+  algorithm: string;
+  otpauth_uri: string;
+}
+
+export async function previewTotp(input: string): Promise<TotpPreview> {
+  return await invoke<TotpPreview>("preview_totp", { input });
+}

@@ -2,16 +2,17 @@
 //
 // Three jobs:
 //   1. Form-fill on demand (popup sends a "fill" message with credentials).
-//   2. Capture submitted logins — listen for form submits and Enter-keypress
-//      inside password fields, harvest the values, ship them off to the
-//      background worker so the popup can offer "Save this login?" on next
-//      open.
-//   3. Inline page banner — show a "Save this login?" card right on the
-//      page, with sign-up vs sign-in awareness, mirroring 1Password's UX.
+//   2. Capture submitted logins (real submits, Enter in a password field,
+//      button clicks whose label matches sign-in/up patterns).
+//   3. Inline page banner: "Save this login?" injected via Shadow DOM, on
+//      the current page (best-effort) AND on the next page (post-nav).
+//
+// Logs are prefixed with `[SPM]` so the user can grep DevTools.
 
 import { detectIntent, type Intent } from "./detect-intent";
-import { isDomainBlocked } from "./blocklist";
 import { showInlineBanner } from "./inline-banner";
+
+const LOG = "[SPM]";
 
 interface FillMessage {
   kind: "fill";
@@ -28,45 +29,81 @@ interface CaptureMessage {
   intent: Intent;
 }
 
-// ---------------- pending banner on next page load ----------------
-//
-// When the user submits a login form, the page often navigates away before
-// the inline banner had time to show. The BG-stashed capture lets the
-// freshly-loaded content script on the destination page resurface the
-// banner so the user still gets a one-click save.
+console.debug(LOG, "content script loaded on", window.location.hostname);
 
+// Blocklist gets loaded into memory once at startup so the submit-time path
+// can decide synchronously, no await before showing the banner.
+let blocklistCache: Set<string> = new Set();
 void (async () => {
   try {
-    if (!chrome.storage?.session) return;
-    const res = await chrome.storage.session.get("pending_capture");
-    const cap = res?.pending_capture as
-      | undefined
-      | {
-          domain: string;
-          url: string;
-          username: string;
-          password: string;
-          capturedAt: number;
-          intent?: Intent;
-        };
-    if (!cap) return;
-    if (Date.now() - (cap.capturedAt ?? 0) > 60_000) return;
-
-    const currentDomain = window.location.hostname.replace(/^www\./, "");
-    if (currentDomain !== cap.domain) return;
-    if (await isDomainBlocked(cap.domain)) return;
-
-    showInlineBanner({
-      domain: cap.domain,
-      url: cap.url,
-      username: cap.username,
-      password: cap.password,
-      intent: cap.intent ?? "login",
-    });
+    const result = await chrome.storage.local.get("save_blocklist");
+    if (Array.isArray(result?.save_blocklist)) {
+      blocklistCache = new Set(result.save_blocklist as string[]);
+    }
   } catch {
-    /* non-fatal */
+    /* default to empty */
   }
 })();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (!("save_blocklist" in changes)) return;
+  const next = changes.save_blocklist?.newValue;
+  blocklistCache = new Set(Array.isArray(next) ? (next as string[]) : []);
+});
+
+// ---------------- pending banner on next page load ----------------
+//
+// When a submit causes a navigation, the banner injected on the old page
+// is gone. The BG-stashed capture surfaces here on the destination page.
+
+async function maybeShowFromPending(): Promise<void> {
+  if (!chrome.storage?.session) return;
+  const res = await chrome.storage.session.get("pending_capture");
+  const cap = res?.pending_capture as
+    | undefined
+    | {
+        domain: string;
+        url: string;
+        username: string;
+        password: string;
+        capturedAt: number;
+        intent?: Intent;
+      };
+  if (!cap) return;
+  if (Date.now() - (cap.capturedAt ?? 0) > 60_000) return;
+
+  const currentDomain = window.location.hostname.replace(/^www\./, "");
+  // Allow base-domain match in either direction so accounts.example.com
+  // shows the banner for an example.com capture and vice versa.
+  if (
+    currentDomain !== cap.domain &&
+    !currentDomain.endsWith("." + cap.domain) &&
+    !cap.domain.endsWith("." + currentDomain)
+  ) {
+    return;
+  }
+  if (blocklistCache.has(cap.domain)) return;
+
+  console.debug(LOG, "resurrecting banner from pending capture");
+  showInlineBanner({
+    domain: cap.domain,
+    url: cap.url,
+    username: cap.username,
+    password: cap.password,
+    intent: cap.intent ?? "login",
+  });
+}
+
+void maybeShowFromPending();
+
+// Also listen for changes to session storage in case the BG hasn't written
+// the capture yet by the time the content script first checks above.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "session") return;
+  if (!("pending_capture" in changes)) return;
+  if (changes.pending_capture?.newValue === undefined) return;
+  void maybeShowFromPending();
+});
 
 // ---------------- fill on demand ----------------
 
@@ -80,15 +117,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // ---------------- capture on submit ----------------
 
-// To avoid double-captures we throttle by hash of (origin, username, password).
 let lastSentHash: string | null = null;
 let lastSentAt = 0;
 
-async function maybeCaptureFromActiveForm() {
+// Synchronous version — safe to call from a submit handler where the page
+// may navigate within the same tick. Reads all DOM values up front.
+function captureNow(reason: string): void {
   const passwordField = findPasswordField();
-  if (!passwordField || !passwordField.value) return;
+  if (!passwordField || !passwordField.value) {
+    console.debug(LOG, "capture skipped (no password field):", reason);
+    return;
+  }
   const usernameField = findUsernameField(passwordField);
-
   const username = usernameField?.value ?? "";
   const password = passwordField.value;
   if (!password) return;
@@ -101,15 +141,22 @@ async function maybeCaptureFromActiveForm() {
     /* keep raw hostname */
   }
 
-  if (await isDomainBlocked(domain)) return;
+  if (blocklistCache.has(domain)) {
+    console.debug(LOG, "capture skipped (domain blocklisted):", domain);
+    return;
+  }
 
   const hash = `${domain}|${username}|${password}`;
   const now = Date.now();
-  if (hash === lastSentHash && now - lastSentAt < 5000) return;
+  if (hash === lastSentHash && now - lastSentAt < 5000) {
+    console.debug(LOG, "capture skipped (duplicate within 5s)");
+    return;
+  }
   lastSentHash = hash;
   lastSentAt = now;
 
   const intent = detectIntent(passwordField);
+  console.debug(LOG, "captured", { reason, domain, intent, username });
 
   const payload: CaptureMessage = {
     kind: "capture",
@@ -119,34 +166,37 @@ async function maybeCaptureFromActiveForm() {
     password,
     intent,
   };
-  // Stash in BG (so the popup also picks it up if the user doesn't act on
-  // the inline banner). Fire-and-forget — the inline UI is the primary path.
-  chrome.runtime.sendMessage(payload).catch(() => {
-    /* background may be inactive */
+
+  // Fire-and-forget to BG so the popup also has access. The .catch is
+  // there because the BG can refuse messages from disappearing tabs.
+  chrome.runtime.sendMessage(payload).catch((err) => {
+    console.debug(LOG, "sendMessage(capture) error:", err);
   });
 
-  // Show the inline banner on the current page. It may get torn down if
-  // the form's submit causes a navigation, in which case the BG-stashed
-  // capture surfaces in the popup as the fallback.
-  showInlineBanner({ domain, url, username, password, intent });
+  // Inject the banner synchronously on the current page. Will be torn down
+  // if the page navigates; the BG-stashed capture above gives us a
+  // second chance on the destination page via maybeShowFromPending().
+  try {
+    showInlineBanner({ domain, url, username, password, intent });
+  } catch (e) {
+    console.debug(LOG, "showInlineBanner threw:", e);
+  }
 }
 
-// Capture on every form submission that has a password field.
+// Real <form> submissions.
 document.addEventListener(
   "submit",
   (event) => {
     const form = event.target as HTMLElement | null;
     if (!(form instanceof HTMLFormElement)) return;
     if (!form.querySelector("input[type=password]")) return;
-    // Capture synchronously *before* the form posts away — but don't block.
-    queueMicrotask(() => void maybeCaptureFromActiveForm());
+    captureNow("form submit");
   },
-  true, // capture phase, so we run before the form may detach
+  true, // capture phase, run before the form may detach
 );
 
-// Many modern SPA login forms use a button click + fetch instead of a real
-// <form>. As a fallback, capture on Enter in a password field, and on any
-// click on a button whose visible text smells like "log in"/"sign in".
+// Enter in a password field — covers SPA forms that use fetch() instead of
+// a real submit.
 document.addEventListener(
   "keydown",
   (event) => {
@@ -154,34 +204,44 @@ document.addEventListener(
     const target = event.target as HTMLElement | null;
     if (!(target instanceof HTMLInputElement)) return;
     if (target.type !== "password") return;
-    queueMicrotask(() => void maybeCaptureFromActiveForm());
+    captureNow("Enter in password field");
   },
   true,
 );
 
+// Clicks on buttons whose visible label matches login/signup verbs.
 document.addEventListener(
   "click",
   (event) => {
     const el = event.target as HTMLElement | null;
     if (!el) return;
-    const btn = el.closest("button, [role=button], input[type=submit]");
+    const btn = el.closest("button, [role=button], input[type=submit], a");
     if (!btn) return;
-    const label = (
-      (btn as HTMLElement).innerText ??
-      btn.getAttribute("aria-label") ??
-      btn.getAttribute("value") ??
-      ""
-    )
-      .trim()
-      .toLowerCase();
+    const label = readableLabel(btn as HTMLElement);
     if (!label) return;
-    if (!/log\s*in|sign\s*in|sign\s*up|continue|submit|anmelden|einloggen|registrieren/.test(label)) {
+    if (
+      !/log\s*in|log\s+on|sign\s*in|sign\s*on|sign\s*up|signin|signup|continue|submit|anmelden|einloggen|registrieren|konto\s+erstellen/i.test(
+        label,
+      )
+    ) {
       return;
     }
-    queueMicrotask(() => void maybeCaptureFromActiveForm());
+    captureNow(`button click "${label.slice(0, 40)}"`);
   },
   true,
 );
+
+function readableLabel(el: HTMLElement): string {
+  const parts: string[] = [];
+  if (el.innerText) parts.push(el.innerText);
+  const aria = el.getAttribute("aria-label");
+  if (aria) parts.push(aria);
+  const value = el.getAttribute("value");
+  if (value) parts.push(value);
+  const title = el.getAttribute("title");
+  if (title) parts.push(title);
+  return parts.join(" ").trim();
+}
 
 // ---------------- fill implementation ----------------
 
@@ -277,3 +337,4 @@ function setNativeValue(el: HTMLInputElement, value: string) {
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
 }
+
