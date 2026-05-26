@@ -1,12 +1,13 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod kdbx;
+mod bridge;
 mod commands;
+mod kdbx;
 mod state;
 
 use state::AppState;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use tauri::Manager;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
@@ -26,7 +27,7 @@ fn main() {
             Some(vec!["--minimized"]),
         ))
         .manage(AppState {
-            database: Mutex::new(None),
+            database: Arc::new(Mutex::new(None)),
             initial_file_path: Mutex::new(None),
             dismissed_breaches: Mutex::new(HashMap::new()),
         })
@@ -119,8 +120,47 @@ fn main() {
                     let _ = window.hide();
                 }
             }
+
+            // Boot the browser-extension bridge in the background. The HTTP
+            // server stays up for the lifetime of the app; we don't keep the
+            // BridgeHandle around because there's nothing to do with it after
+            // the bridge.json is written — the OS reclaims sockets at process
+            // exit, and remove_bridge_file() in the exit path handles cleanup.
+            let app_handle = app.handle().clone();
+            let db_handle = app.state::<AppState>().database.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = launch_bridge(app_handle, db_handle).await {
+                    eprintln!("[bridge] failed to start: {}", e);
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    // On graceful shutdown, wipe the bridge file so a stale token can't be
+    // used after this process exits. Tauri returns from `.run()` only when
+    // the app is fully torn down, so reaching this point is safe.
+    if let Some(dir) = bridge::bridge_state_dir() {
+        bridge::remove_bridge_file(&dir);
+    }
+}
+
+async fn launch_bridge(
+    _app_handle: tauri::AppHandle,
+    db_handle: state::DatabaseHandle,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let bridge_file = bridge::start(db_handle).await?;
+
+    let dir = bridge::bridge_state_dir()
+        .ok_or("could not determine local data dir for bridge.json")?;
+    let path = bridge::write_bridge_file(&dir, &bridge_file)?;
+
+    println!(
+        "[bridge] listening on 127.0.0.1:{}, state file: {}",
+        bridge_file.port,
+        path.display()
+    );
+    Ok(())
 }
