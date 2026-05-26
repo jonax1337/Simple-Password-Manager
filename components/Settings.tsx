@@ -133,7 +133,9 @@ export function Settings() {
         setUpdateStatus("uptodate");
       }
     } catch (err) {
-      setUpdateError(err instanceof Error ? err.message : "Update check failed");
+      setUpdateError(
+        err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+      );
       setUpdateStatus("error");
     }
   };
@@ -147,7 +149,9 @@ export function Settings() {
         await relaunch();
       }
     } catch (err) {
-      setUpdateError(err instanceof Error ? err.message : "Update install failed");
+      setUpdateError(
+        err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+      );
       setUpdateStatus("error");
     }
   };
