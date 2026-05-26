@@ -295,7 +295,7 @@ export function BreachedPasswordsCard({ refreshTrigger, databasePath, onEditEntr
                   onDoubleClick={() => onEditEntry(entry.uuid)}
                 >
                   {/* Checkbox */}
-                  <div className="flex items-center w-8 justify-center flex-shrink-0">
+                  <div className="flex items-center w-8 justify-center shrink-0">
                     <Checkbox
                       checked={selectedUuids.has(entry.uuid)}
                       onCheckedChange={() => toggleSelectEntry(entry.uuid)}
@@ -304,7 +304,7 @@ export function BreachedPasswordsCard({ refreshTrigger, databasePath, onEditEntr
                   </div>
                   
                   {/* Icon */}
-                  <div className="flex items-center w-8 flex-shrink-0">
+                  <div className="flex items-center w-8 shrink-0">
                     <AlertTriangle className="h-4 w-4 text-red-500" />
                   </div>
                   
@@ -321,14 +321,14 @@ export function BreachedPasswordsCard({ refreshTrigger, databasePath, onEditEntr
                   </div>
                   
                   {/* Breach Count */}
-                  <div className="w-32 flex-shrink-0">
+                  <div className="w-32 shrink-0">
                     <p className="text-sm text-red-600 dark:text-red-400">
                       {entry.breach_count.toLocaleString()} breach{entry.breach_count !== 1 ? 'es' : ''}
                     </p>
                   </div>
                   
                   {/* Actions */}
-                  <div className="w-24 flex items-center gap-1 flex-shrink-0">
+                  <div className="w-24 flex items-center gap-1 shrink-0">
                     <Button
                       variant="ghost"
                       size="icon"

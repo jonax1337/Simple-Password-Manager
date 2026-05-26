@@ -214,7 +214,7 @@ export function GroupTree({
                     }`}
                     onClick={() => onSelectGroup("_dashboard")}
                   >
-                    <LayoutPanelLeft className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <LayoutPanelLeft className="h-4 w-4 text-muted-foreground shrink-0" />
                     <span className="truncate text-sm font-medium">Dashboard</span>
                   </div>
 
@@ -224,7 +224,7 @@ export function GroupTree({
                     }`}
                     onClick={() => onSelectGroup("_favorites")}
                   >
-                    <Star className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <Star className="h-4 w-4 text-muted-foreground shrink-0" />
                     <span className="truncate text-sm font-medium">Favorites</span>
                   </div>
                   

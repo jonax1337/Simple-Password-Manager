@@ -206,7 +206,7 @@ export function EntryEditor({ entry, onClose, onRefresh, onHasChangesChange }: E
     <div className="flex h-full flex-col">
       <CustomTitleBar title={`Edit Entry - ${formData.title}`} hideMaximize />
       {/* Header */}
-      <div className="flex-shrink-0 flex items-center gap-3 border-b px-4 py-3 bg-muted/30">
+      <div className="shrink-0 flex items-center gap-3 border-b px-4 py-3 bg-muted/30">
         <IconPicker value={iconId} onChange={handleIconChange} />
         <div>
           <h1 className="text-lg font-semibold">Edit Entry</h1>
@@ -215,7 +215,7 @@ export function EntryEditor({ entry, onClose, onRefresh, onHasChangesChange }: E
       </div>
 
       <Tabs defaultValue="general" className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <TabsList className="flex-shrink-0 w-full justify-start rounded-none border-b bg-transparent p-0 h-auto">
+        <TabsList className="shrink-0 w-full justify-start rounded-none border-b bg-transparent p-0 h-auto">
           <TabsTrigger value="general" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">
             General
           </TabsTrigger>
@@ -268,7 +268,7 @@ export function EntryEditor({ entry, onClose, onRefresh, onHasChangesChange }: E
       </Tabs>
 
       {/* Footer */}
-      <div className="flex-shrink-0 flex items-center justify-end gap-2 border-t px-4 py-3 bg-background">
+      <div className="shrink-0 flex items-center justify-end gap-2 border-t px-4 py-3 bg-background">
         <Button 
           variant="outline" 
           onClick={onClose}

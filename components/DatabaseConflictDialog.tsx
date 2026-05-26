@@ -51,7 +51,7 @@ export function DatabaseConflictDialog({
             onClick={onSynchronize}
             className="w-full flex items-start gap-3 p-3 rounded-md border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
           >
-            <ArrowDownUp className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+            <ArrowDownUp className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
             <div className="flex-1 space-y-1">
               <div className="font-medium text-blue-600">Synchronize</div>
               <div className="text-sm text-muted-foreground">
@@ -64,7 +64,7 @@ export function DatabaseConflictDialog({
             onClick={onOverwrite}
             className="w-full flex items-start gap-3 p-3 rounded-md border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
           >
-            <FileDown className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+            <FileDown className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
             <div className="flex-1 space-y-1">
               <div className="font-medium text-blue-600">Overwrite</div>
               <div className="text-sm text-muted-foreground">
@@ -77,7 +77,7 @@ export function DatabaseConflictDialog({
             onClick={onCancel}
             className="w-full flex items-start gap-3 p-3 rounded-md border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
           >
-            <X className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
+            <X className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
             <div className="flex-1 space-y-1">
               <div className="font-medium text-blue-600">Cancel</div>
               <div className="text-sm text-muted-foreground">

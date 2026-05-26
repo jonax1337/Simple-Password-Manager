@@ -446,7 +446,7 @@ function AnimateIcon({
 }
 
 const pathClassName =
-  "[&_[stroke-dasharray='1px_1px']]:![stroke-dasharray:1px_0px]";
+  "**:[[stroke-dasharray='1px_1px']]:[stroke-dasharray:1px_0px]!";
 
 function IconWrapper<T extends string>({
   size = 28,

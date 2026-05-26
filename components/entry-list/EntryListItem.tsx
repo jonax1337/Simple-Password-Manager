@@ -123,7 +123,7 @@ export function EntryListItem({
           style={{ touchAction: 'none' }}
         >
           {/* Fixed left section */}
-          <div className="flex items-center gap-1 px-4 py-2.5 flex-shrink-0">
+          <div className="flex items-center gap-1 px-4 py-2.5 shrink-0">
             {/* Drag Handle */}
             <div
               {...listeners}
@@ -153,7 +153,7 @@ export function EntryListItem({
               {visibleColumns.map((col) => (
                 <div 
                   key={col.id} 
-                  className="relative overflow-hidden min-w-0 flex-shrink-0" 
+                  className="relative overflow-hidden min-w-0 shrink-0" 
                   style={{ width: `${col.width}px` }}
                 >
                   <div className="py-2.5 h-full flex items-center">
@@ -196,7 +196,7 @@ export function EntryListItem({
                             title={entry.url}
                           >
                             <span className="truncate">{entry.url}</span>
-                            <ExternalLink className="h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <ExternalLink className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </button>
                         ) : (
                           <span className="text-sm text-muted-foreground">—</span>

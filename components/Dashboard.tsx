@@ -278,7 +278,7 @@ export function Dashboard({ refreshTrigger, databasePath, isDirty }: DashboardPr
                    stats.old_passwords === 0 && 
                    stats.expired_entries === 0 ? (
                   <div className="flex items-start gap-2 text-sm">
-                    <Shield className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                    <Shield className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
                     <div>
                       <p className="font-medium text-green-600">All good!</p>
                       <p className="text-muted-foreground text-xs">
@@ -290,7 +290,7 @@ export function Dashboard({ refreshTrigger, databasePath, isDirty }: DashboardPr
                   <>
                 {stats.weak_passwords > 0 && (
                   <div className="flex items-start gap-2 text-sm">
-                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
                     <div>
                       <p className="font-medium">Update weak passwords</p>
                       <p className="text-muted-foreground text-xs">
@@ -302,7 +302,7 @@ export function Dashboard({ refreshTrigger, databasePath, isDirty }: DashboardPr
 
                 {stats.reused_passwords > 0 && (
                   <div className="flex items-start gap-2 text-sm">
-                    <Copy className="h-4 w-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                    <Copy className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
                     <div>
                       <p className="font-medium">Replace reused passwords</p>
                       <p className="text-muted-foreground text-xs">
@@ -314,7 +314,7 @@ export function Dashboard({ refreshTrigger, databasePath, isDirty }: DashboardPr
 
                 {stats.old_passwords > 0 && (
                   <div className="flex items-start gap-2 text-sm">
-                    <Clock className="h-4 w-4 text-yellow-500 mt-0.5 flex-shrink-0" />
+                    <Clock className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
                     <div>
                       <p className="font-medium">Refresh old passwords</p>
                       <p className="text-muted-foreground text-xs">
@@ -326,7 +326,7 @@ export function Dashboard({ refreshTrigger, databasePath, isDirty }: DashboardPr
 
                 {stats.expired_entries > 0 && (
                   <div className="flex items-start gap-2 text-sm">
-                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
                     <div>
                       <p className="font-medium">Review expired entries</p>
                       <p className="text-muted-foreground text-xs">

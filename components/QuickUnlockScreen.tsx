@@ -125,7 +125,7 @@ export function QuickUnlockScreen({
       <div className="flex h-full w-full flex-col">
         <CustomTitleBar />
         <motion.div 
-          className="flex flex-1 items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900"
+          className="flex flex-1 items-center justify-center bg-linear-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.3 }}
