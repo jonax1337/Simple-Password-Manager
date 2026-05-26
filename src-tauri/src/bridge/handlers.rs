@@ -275,6 +275,63 @@ pub async fn create_entry(
     }))
 }
 
+// ---------- PUT /v1/entries/:id ----------
+//
+// Used by the browser-extension Save banner when a captured login matches
+// an existing entry by domain+username but the password differs — a
+// "rotate password" flow. Only the password (and optionally URL) is
+// updated; everything else stays as-is so the entry's title / notes /
+// custom fields are preserved. update_entry() takes care of the history
+// snapshot internally.
+
+#[derive(Deserialize)]
+pub struct UpdateEntryRequest {
+    pub password: String,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UpdateEntryResponse {
+    pub uuid: String,
+    pub title: String,
+}
+
+pub async fn update_entry(
+    State(state): State<BridgeState>,
+    Path(uuid): Path<String>,
+    Json(req): Json<UpdateEntryRequest>,
+) -> Result<Json<UpdateEntryResponse>, StatusCode> {
+    if req.password.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let mut guard = state
+        .db_handle
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db = guard.as_mut().ok_or(StatusCode::LOCKED)?;
+
+    // Read the existing entry so we can preserve everything except the
+    // fields the caller is updating.
+    let mut entry = db
+        .get_entry(&uuid)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    entry.password = req.password;
+    if let Some(new_url) = req.url {
+        entry.url = new_url;
+    }
+
+    let title = entry.title.clone();
+    db.update_entry(entry)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    db.save()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(UpdateEntryResponse { uuid, title }))
+}
+
 // ---------- POST /v1/password/generate ----------
 
 #[derive(Deserialize)]

@@ -102,7 +102,7 @@ async function getBridge(force = false): Promise<BridgeInfo> {
 }
 
 async function doFetch<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   path: string,
   body?: unknown,
 ): Promise<BgResponse<T>> {

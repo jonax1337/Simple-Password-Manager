@@ -95,6 +95,7 @@ pub fn router(state: BridgeState) -> Router {
             "/v1/entries",
             get(handlers::list_entries).post(handlers::create_entry),
         )
+        .route("/v1/entries/{id}", axum::routing::put(handlers::update_entry))
         .route("/v1/entries/{id}/password", get(handlers::entry_password))
         .route("/v1/entries/{id}/totp", get(handlers::entry_totp))
         .route("/v1/password/generate", post(handlers::generate_password))

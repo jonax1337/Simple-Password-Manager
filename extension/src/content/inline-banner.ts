@@ -3,6 +3,14 @@
 // Lives in a Shadow DOM so the host page's CSS can't deface us and vice
 // versa. Uses inline styles + Tailwind-flavoured class names defined inside
 // the shadow root.
+//
+// On mount the banner asks the bridge whether the captured credentials
+// match any existing entry for this domain:
+//   - duplicate          → silently dismiss (nothing to ask the user)
+//   - update_available   → morph into "Update saved login?" mode and
+//                          PUT to the matched UUID on submit
+//   - neither            → stay in default "Save" mode and POST a new
+//                          entry on submit
 
 import { blockDomain } from "./blocklist";
 
@@ -15,6 +23,17 @@ export interface InlineBannerInput {
 }
 
 const HOST_ID = "spm-inline-save-banner";
+
+interface CheckEntryResponse {
+  duplicate: boolean;
+  update_available: boolean;
+  matching_uuid: string | null;
+  matching_title: string | null;
+}
+
+type Mode =
+  | { kind: "new" }
+  | { kind: "update"; uuid: string; existingTitle: string };
 
 export function showInlineBanner(input: InlineBannerInput) {
   // Remove any previously-shown banner so we don't stack them.
@@ -56,12 +75,12 @@ function templateHtml(input: InlineBannerInput): string {
       </header>
 
       <div class="body">
-        <h2 id="spm-title" class="title">${escapeHtml(title)}</h2>
-        <p class="subtitle">
+        <h2 id="spm-title" class="title" data-title>${escapeHtml(title)}</h2>
+        <p class="subtitle" data-subtitle>
           <strong>${escapeHtml(input.domain)}</strong>
           ${input.username ? ` &middot; ${escapeHtml(input.username)}` : ""}
         </p>
-        <label class="label" for="spm-title-input">Title</label>
+        <label class="label" for="spm-title-input" data-title-label>Title</label>
         <input
           id="spm-title-input"
           type="text"
@@ -73,7 +92,7 @@ function templateHtml(input: InlineBannerInput): string {
       </div>
 
       <footer class="footer">
-        <button class="btn btn-primary" data-action="save">Save to vault</button>
+        <button class="btn btn-primary" data-action="save" data-save-label>Save to vault</button>
         <button class="btn btn-outline" data-action="dismiss">Not now</button>
       </footer>
 
@@ -90,8 +109,13 @@ function wireUp(
   input: InlineBannerInput,
 ) {
   const titleInput = shadow.querySelector<HTMLInputElement>("#spm-title-input")!;
+  const titleEl = shadow.querySelector<HTMLHeadingElement>("[data-title]")!;
+  const subtitleEl = shadow.querySelector<HTMLParagraphElement>("[data-subtitle]")!;
+  const titleLabel = shadow.querySelector<HTMLLabelElement>("[data-title-label]")!;
+  const saveBtn = shadow.querySelector<HTMLButtonElement>("[data-save-label]")!;
   const statusEl = shadow.querySelector<HTMLDivElement>("[data-status]")!;
   let busy = false;
+  let mode: Mode = { kind: "new" };
 
   function setStatus(msg: string, tone: "info" | "error" | "success" = "info") {
     statusEl.hidden = false;
@@ -105,11 +129,85 @@ function wireUp(
     void chrome.storage.local.remove("pending_capture").catch(() => {});
   }
 
+  function morphToUpdateMode(existingTitle: string) {
+    const verb = input.intent === "signup" ? "Save" : "Update";
+    titleEl.textContent =
+      input.intent === "signup"
+        ? "Save this new password?"
+        : "Update saved login?";
+    subtitleEl.innerHTML =
+      `<strong>${escapeHtml(input.domain)}</strong>` +
+      (input.username ? ` &middot; ${escapeHtml(input.username)}` : "") +
+      `<br><span class="muted">Will update “${escapeHtml(existingTitle)}”</span>`;
+    // No editable title in update mode — we're modifying an existing entry.
+    titleInput.hidden = true;
+    titleLabel.hidden = true;
+    saveBtn.textContent = `${verb} password`;
+  }
+
+  async function refineModeFromBackend() {
+    const resp: { ok: boolean; data?: CheckEntryResponse } = await chrome.runtime
+      .sendMessage({
+        kind: "fetch",
+        method: "POST",
+        path: "/v1/entries/check",
+        body: {
+          domain: input.domain,
+          username: input.username,
+          password: input.password,
+        },
+      })
+      .catch(() => ({ ok: false }));
+
+    if (!resp?.ok || !resp.data) return;
+    const data = resp.data;
+
+    if (data.duplicate) {
+      // Exact dup — nothing to ask.
+      dismiss();
+      return;
+    }
+    if (data.update_available && data.matching_uuid) {
+      mode = {
+        kind: "update",
+        uuid: data.matching_uuid,
+        existingTitle: data.matching_title ?? input.domain,
+      };
+      morphToUpdateMode(mode.existingTitle);
+    }
+  }
+
   async function save() {
     if (busy) return;
     busy = true;
-    setStatus("Saving…");
 
+    if (mode.kind === "update") {
+      setStatus("Updating…");
+      const resp = await chrome.runtime.sendMessage({
+        kind: "fetch",
+        method: "PUT",
+        path: `/v1/entries/${encodeURIComponent(mode.uuid)}`,
+        body: {
+          password: input.password,
+          url: input.url,
+        },
+      });
+      busy = false;
+      if (resp?.ok) {
+        try {
+          await chrome.storage.local.remove("pending_capture");
+        } catch {
+          /* */
+        }
+        setStatus("Password updated.", "success");
+        setTimeout(dismiss, 1200);
+      } else {
+        setStatus(resp?.error ?? "Could not update", "error");
+      }
+      return;
+    }
+
+    setStatus("Saving…");
     const title = titleInput.value.trim() || input.domain;
     const resp = await chrome.runtime.sendMessage({
       kind: "fetch",
@@ -125,11 +223,10 @@ function wireUp(
     busy = false;
 
     if (resp?.ok) {
-      // Clear the pending-capture stash so the popup doesn't double-prompt.
       try {
         await chrome.storage.local.remove("pending_capture");
       } catch {
-        /* may not exist; that's fine */
+        /* */
       }
       setStatus("Saved.", "success");
       setTimeout(dismiss, 1200);
@@ -172,6 +269,9 @@ function wireUp(
   // Focus the title field so the user can immediately tweak it.
   titleInput.focus();
   titleInput.select();
+
+  // Async refinement: switch to update mode if a matching entry exists.
+  void refineModeFromBackend();
 }
 
 // Tiny utilities ------------------------------------------------------------
@@ -255,8 +355,15 @@ function css(): string {
       font-size: 12px;
       color: #6b6386;
     }
+    .subtitle .muted {
+      display: inline-block;
+      margin-top: 2px;
+      font-size: 11px;
+      color: #9690ad;
+    }
     @media (prefers-color-scheme: dark) {
       .subtitle { color: #a09bbd; }
+      .subtitle .muted { color: #7a7596; }
     }
     .label {
       display: block; font-size: 11px; font-weight: 500;

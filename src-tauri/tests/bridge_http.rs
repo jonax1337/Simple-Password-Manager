@@ -471,6 +471,152 @@ async fn create_entry_when_locked_returns_423() {
     assert_eq!(resp.status(), 423);
 }
 
+// ---------- update entry ----------
+
+#[tokio::test]
+async fn update_entry_rotates_password() {
+    let (_d, handle) = unlocked_db_handle();
+    let base = spawn_server(handle.clone(), TOKEN).await;
+
+    // Find the seeded entry's UUID.
+    let hits: Vec<serde_json::Value> = client()
+        .get(format!("{}/v1/entries?domain=github.com", base))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let uuid = hits[0]["uuid"].as_str().unwrap().to_string();
+
+    let resp = client()
+        .put(format!("{}/v1/entries/{}", base, uuid))
+        .bearer_auth(TOKEN)
+        .json(&serde_json::json!({ "password": "rotated-pw" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // The new password is what /password returns.
+    let body: serde_json::Value = client()
+        .get(format!("{}/v1/entries/{}/password", base, uuid))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(body["password"], "rotated-pw");
+    // Title and username are preserved.
+    assert_eq!(body["title"], "GitHub");
+    assert_eq!(body["username"], "alice");
+}
+
+#[tokio::test]
+async fn update_entry_rejects_empty_password() {
+    let (_d, handle) = unlocked_db_handle();
+    let base = spawn_server(handle.clone(), TOKEN).await;
+
+    let hits: Vec<serde_json::Value> = client()
+        .get(format!("{}/v1/entries?domain=github.com", base))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let uuid = hits[0]["uuid"].as_str().unwrap().to_string();
+
+    let resp = client()
+        .put(format!("{}/v1/entries/{}", base, uuid))
+        .bearer_auth(TOKEN)
+        .json(&serde_json::json!({ "password": "" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+}
+
+#[tokio::test]
+async fn update_entry_returns_404_for_unknown_uuid() {
+    let (_d, handle) = unlocked_db_handle();
+    let base = spawn_server(handle, TOKEN).await;
+
+    let resp = client()
+        .put(format!(
+            "{}/v1/entries/00000000-0000-0000-0000-000000000000",
+            base
+        ))
+        .bearer_auth(TOKEN)
+        .json(&serde_json::json!({ "password": "x" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 404);
+}
+
+#[tokio::test]
+async fn update_entry_when_locked_returns_423() {
+    let base = spawn_server(locked_db_handle(), TOKEN).await;
+    let resp = client()
+        .put(format!(
+            "{}/v1/entries/00000000-0000-0000-0000-000000000000",
+            base
+        ))
+        .bearer_auth(TOKEN)
+        .json(&serde_json::json!({ "password": "x" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 423);
+}
+
+#[tokio::test]
+async fn update_entry_optionally_updates_url() {
+    let (_d, handle) = unlocked_db_handle();
+    let base = spawn_server(handle.clone(), TOKEN).await;
+
+    let hits: Vec<serde_json::Value> = client()
+        .get(format!("{}/v1/entries?domain=github.com", base))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let uuid = hits[0]["uuid"].as_str().unwrap().to_string();
+
+    let resp = client()
+        .put(format!("{}/v1/entries/{}", base, uuid))
+        .bearer_auth(TOKEN)
+        .json(&serde_json::json!({
+            "password": "new",
+            "url": "https://github.example/settings"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // The entry should now match the new domain too.
+    let hits2: Vec<serde_json::Value> = client()
+        .get(format!("{}/v1/entries?domain=github.example", base))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(hits2.len(), 1);
+    assert_eq!(hits2[0]["uuid"], uuid);
+}
+
 // ---------- focus app ----------
 
 #[tokio::test]

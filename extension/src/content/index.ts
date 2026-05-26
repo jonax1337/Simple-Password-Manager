@@ -117,43 +117,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   void maybeShowFromPending();
 });
 
-// Tear down the pending capture (and any visible banner) if the backend
-// tells us we already have these exact credentials saved.
-async function checkAndMaybeSuppressDuplicate(
-  passwordField: HTMLInputElement,
-  username: string,
-  password: string,
-): Promise<void> {
-  const url = window.location.href;
-  let domain = window.location.hostname;
-  try {
-    domain = new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    /* keep raw hostname */
-  }
-
-  const resp: {
-    ok: boolean;
-    data?: { duplicate?: boolean };
-  } = await chrome.runtime
-    .sendMessage({
-      kind: "fetch",
-      method: "POST",
-      path: "/v1/entries/check",
-      body: { domain, username, password },
-    })
-    .catch(() => ({ ok: false }));
-
-  if (!resp?.ok || !resp.data) return;
-  if (!resp.data.duplicate) return;
-
-  console.debug(LOG, "capture suppressed: already saved for", domain);
-  void chrome.storage.local.remove(PENDING_KEY);
-  // Best-effort: dismiss any banner that already rendered.
-  document.getElementById("spm-inline-save-banner")?.remove();
-  void passwordField; // suppress unused warning
-}
-
 // BG also still broadcasts capture-available; harmless redundancy.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if ((msg as { kind?: string })?.kind === "capture-available") {
@@ -323,12 +286,10 @@ function captureNow(reason: string): void {
   const password = passwordField.value;
   if (!password) return;
 
-  // Skip if these exact credentials are already saved for this domain.
-  // Fire-and-forget — the duplicate-check is async but the storage.set /
-  // banner injection are local and instantaneous; if the result comes back
-  // saying "dup", we tear the just-stashed capture down again. Net effect
-  // from the user's perspective: banner never appears for an exact dup.
-  void checkAndMaybeSuppressDuplicate(passwordField, username, password);
+  // Note: duplicate/update detection happens inside the banner itself —
+  // it queries /v1/entries/check on mount and either dismisses (duplicate)
+  // or morphs into "update" mode. Keeping that logic in one place means
+  // resurrected banners after navigation also get the same treatment.
 
   const url = window.location.href;
   let domain = window.location.hostname;
