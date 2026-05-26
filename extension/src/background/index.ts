@@ -17,6 +17,22 @@ import {
 
 const PENDING_CAPTURE_KEY = "pending_capture";
 
+// Content scripts can't see chrome.storage.session unless the extension
+// explicitly opens it up. Without this, maybeShowFromPending() in the
+// content script returns nothing — the banner appears once on the login
+// page and never resurfaces on the MFA / 2FA destination page.
+void (async () => {
+  try {
+    await chrome.storage.session.setAccessLevel({
+      accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS",
+    });
+  } catch {
+    /* older Chrome versions reject the call — fail-safe, just means the
+       inline banner on the next page won't appear, but the popup-side
+       save banner still works. */
+  }
+})();
+
 let cached: BridgeInfo | null = null;
 let cacheLoadedAt = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — token rotates per app start
