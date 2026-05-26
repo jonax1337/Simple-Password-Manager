@@ -1,9 +1,39 @@
-use keepass::db::{GroupId, GroupRef, Icon};
+use keepass::db::{CustomDataItem, CustomDataValue, Group, GroupId, GroupRef, Icon};
 use uuid::Uuid;
 
 use super::database::Database;
 use super::error::DatabaseError;
 use super::types::GroupData;
+
+// keepass 0.13.x stores child groups as `HashSet<GroupId>` so iteration order
+// is implementation-defined. We persist an explicit ordering by writing an
+// integer index into each group's `custom_data` under a namespaced key.
+// Older databases (or groups created by KeePass / KeePassXC) won't have the
+// key — they sort last, by name, which matches the "newcomers go to the end"
+// behavior most users expect.
+const SORT_INDEX_KEY: &str = "_spm_sort_index";
+
+fn read_sort_index(group: &Group) -> u32 {
+    group
+        .custom_data
+        .get(SORT_INDEX_KEY)
+        .and_then(|item| item.value.as_ref())
+        .and_then(|value| match value {
+            CustomDataValue::String(s) => s.parse::<u32>().ok(),
+            CustomDataValue::Binary(_) => None,
+        })
+        .unwrap_or(u32::MAX)
+}
+
+fn write_sort_index(group: &mut Group, index: u32) {
+    group.custom_data.insert(
+        SORT_INDEX_KEY.to_string(),
+        CustomDataItem {
+            value: Some(CustomDataValue::String(index.to_string())),
+            last_modification_time: Some(chrono::Utc::now().naive_utc()),
+        },
+    );
+}
 
 impl Database {
     pub fn get_root_group(&self) -> GroupData {
@@ -13,8 +43,18 @@ impl Database {
     pub(super) fn convert_group(group: GroupRef<'_>, parent_uuid: Option<String>) -> GroupData {
         let uuid = group.id().uuid().to_string();
 
-        let children: Vec<GroupData> = group
-            .groups()
+        // Sort children by (persisted index, name) so the UI sees a stable
+        // ordering across reads. Groups without a recorded index fall back
+        // to u32::MAX and are tie-broken by name.
+        let mut sorted_children: Vec<GroupRef<'_>> = group.groups().collect();
+        sorted_children.sort_by(|a, b| {
+            let ai = read_sort_index(a);
+            let bi = read_sort_index(b);
+            ai.cmp(&bi).then_with(|| a.name.cmp(&b.name))
+        });
+
+        let children: Vec<GroupData> = sorted_children
+            .into_iter()
             .map(|child| Self::convert_group(child, Some(uuid.clone())))
             .collect();
 
@@ -43,6 +83,23 @@ impl Database {
             None => self.db.root().id(),
         };
 
+        // Find the largest existing sibling sort index so we can append the
+        // new group at the end. Anything missing an index (u32::MAX sentinel)
+        // is ignored so a single legacy sibling doesn't push the new group
+        // into MAX-territory.
+        let next_index = self
+            .db
+            .group(parent_id)
+            .map(|p| {
+                p.groups()
+                    .map(|g| read_sort_index(&g))
+                    .filter(|&i| i != u32::MAX)
+                    .max()
+                    .map(|m| m.saturating_add(1))
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+
         let mut parent = self
             .db
             .group_mut(parent_id)
@@ -53,6 +110,7 @@ impl Database {
         if let Some(id) = icon_id {
             new_group.set_icon_builtin(id as usize);
         }
+        write_sort_index(&mut new_group, next_index);
         Ok(())
     }
 
@@ -101,18 +159,49 @@ impl Database {
             .map_err(|_| DatabaseError::GroupNotFound)
     }
 
-    // Group order is not preserved in keepass 0.13.x (children are stored as
-    // HashSet<GroupId>), so explicit reordering is a no-op. Kept for API
-    // compatibility with the frontend until a custom ordering mechanism is in.
+    // Persist a new position for `group_uuid` among its siblings by
+    // rewriting every sibling's sort index. We always renumber from 0
+    // upward so an arbitrarily-old database with sparse / missing indices
+    // ends up densely ordered after the first reorder of its parent.
     pub fn reorder_group(
         &mut self,
         group_uuid: &str,
-        _target_index: usize,
+        target_index: usize,
     ) -> Result<(), DatabaseError> {
         let id = Self::parse_group_id(group_uuid)?;
-        if self.db.group(id).is_none() {
-            return Err(DatabaseError::GroupNotFound);
+
+        // Build the desired ordering while holding only an immutable borrow.
+        let (parent_id, mut ordered_ids) = {
+            let group_ref = self.db.group(id).ok_or(DatabaseError::GroupNotFound)?;
+            let parent_ref = group_ref.parent().ok_or(DatabaseError::GroupNotFound)?;
+            let parent_id = parent_ref.id();
+
+            let mut siblings: Vec<(u32, String, GroupId)> = parent_ref
+                .groups()
+                .map(|g| (read_sort_index(&g), g.name.clone(), g.id()))
+                .collect();
+            // GroupId isn't Ord (just Eq/Hash). Sort by the (index, name)
+            // prefix only — that's a total order for our purposes.
+            siblings.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+            let ids: Vec<GroupId> = siblings.into_iter().map(|(_, _, gid)| gid).collect();
+            (parent_id, ids)
+        };
+
+        // Re-position the moved group inside the ordering.
+        ordered_ids.retain(|&gid| gid != id);
+        let target = target_index.min(ordered_ids.len());
+        ordered_ids.insert(target, id);
+
+        // Now flip to mutable mode and write back densely numbered indices.
+        for (new_idx, gid) in ordered_ids.into_iter().enumerate() {
+            if let Some(mut sibling) = self.db.group_mut(gid) {
+                write_sort_index(&mut sibling, new_idx as u32);
+            }
         }
+
+        // Silence unused-warning if parent_id ends up not needed in future
+        // refactors. The lookup above also validates the group has a parent.
+        let _ = parent_id;
         Ok(())
     }
 
@@ -273,19 +362,148 @@ mod tests {
     }
 
     #[test]
-    fn reorder_group_is_currently_a_noop_but_validates_uuid() {
+    fn create_group_appends_new_groups_at_the_end() {
         let (_dir, mut db) = fresh_db();
         let root = db.get_root_group().uuid;
-        db.create_group("A".into(), Some(root), None).unwrap();
-        let a = db.get_root_group().children[0].uuid.clone();
+        db.create_group("First".into(), Some(root.clone()), None).unwrap();
+        db.create_group("Second".into(), Some(root.clone()), None).unwrap();
+        db.create_group("Third".into(), Some(root), None).unwrap();
 
-        // Real group → ok (no-op)
-        assert!(db.reorder_group(&a, 0).is_ok());
+        let names: Vec<_> = db
+            .get_root_group()
+            .children
+            .into_iter()
+            .map(|g| g.name)
+            .collect();
+        assert_eq!(names, vec!["First", "Second", "Third"]);
+    }
 
+    #[test]
+    fn reorder_group_validates_uuid_and_rejects_root() {
+        let (_dir, mut db) = fresh_db();
         // Fake uuid → GroupNotFound
         let err = db
             .reorder_group("00000000-0000-0000-0000-000000000000", 0)
             .unwrap_err();
         assert!(matches!(err, DatabaseError::GroupNotFound));
+
+        // Root has no parent so it can't be reordered.
+        let root = db.get_root_group().uuid;
+        let err = db.reorder_group(&root, 0).unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+
+    #[test]
+    fn reorder_group_moves_to_front() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("A".into(), Some(root.clone()), None).unwrap();
+        db.create_group("B".into(), Some(root.clone()), None).unwrap();
+        db.create_group("C".into(), Some(root), None).unwrap();
+
+        let c_uuid = db
+            .get_root_group()
+            .children
+            .iter()
+            .find(|g| g.name == "C")
+            .unwrap()
+            .uuid
+            .clone();
+
+        db.reorder_group(&c_uuid, 0).unwrap();
+
+        let names: Vec<_> = db
+            .get_root_group()
+            .children
+            .into_iter()
+            .map(|g| g.name)
+            .collect();
+        assert_eq!(names, vec!["C", "A", "B"]);
+    }
+
+    #[test]
+    fn reorder_group_moves_to_middle() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("A".into(), Some(root.clone()), None).unwrap();
+        db.create_group("B".into(), Some(root.clone()), None).unwrap();
+        db.create_group("C".into(), Some(root), None).unwrap();
+
+        let a_uuid = db
+            .get_root_group()
+            .children
+            .iter()
+            .find(|g| g.name == "A")
+            .unwrap()
+            .uuid
+            .clone();
+
+        // Move A from index 0 to index 1: expect ["B", "A", "C"]
+        db.reorder_group(&a_uuid, 1).unwrap();
+
+        let names: Vec<_> = db
+            .get_root_group()
+            .children
+            .into_iter()
+            .map(|g| g.name)
+            .collect();
+        assert_eq!(names, vec!["B", "A", "C"]);
+    }
+
+    #[test]
+    fn reorder_group_clamps_oversized_index_to_end() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("A".into(), Some(root.clone()), None).unwrap();
+        db.create_group("B".into(), Some(root), None).unwrap();
+        let a_uuid = db
+            .get_root_group()
+            .children
+            .iter()
+            .find(|g| g.name == "A")
+            .unwrap()
+            .uuid
+            .clone();
+
+        db.reorder_group(&a_uuid, 999).unwrap();
+        let names: Vec<_> = db
+            .get_root_group()
+            .children
+            .into_iter()
+            .map(|g| g.name)
+            .collect();
+        assert_eq!(names, vec!["B", "A"]);
+    }
+
+    #[test]
+    fn reorder_persists_after_save_and_reopen() {
+        // Make sure the sort_index survives a KDBX roundtrip.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("reorder.kdbx");
+        let mut db = Database::create(path.clone(), "pw".into()).unwrap();
+        let root = db.get_root_group().uuid;
+
+        db.create_group("A".into(), Some(root.clone()), None).unwrap();
+        db.create_group("B".into(), Some(root.clone()), None).unwrap();
+        let b_uuid = db
+            .get_root_group()
+            .children
+            .iter()
+            .find(|g| g.name == "B")
+            .unwrap()
+            .uuid
+            .clone();
+        db.reorder_group(&b_uuid, 0).unwrap();
+        db.save().unwrap();
+        drop(db);
+
+        let reopened = Database::open(path, "pw".into()).unwrap();
+        let names: Vec<_> = reopened
+            .get_root_group()
+            .children
+            .into_iter()
+            .map(|g| g.name)
+            .collect();
+        assert_eq!(names, vec!["B", "A"]);
     }
 }
