@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 import { getDefaultExpiryDate, getExpiryDate } from "./utils/formatters";
+import { TotpSection } from "./TotpSection";
 import type { EntryData } from "@/lib/tauri";
 
 interface GeneralTabProps {
@@ -210,6 +211,13 @@ export function GeneralTab({
             {urlError && <p className="text-xs text-red-500">{urlError}</p>}
           </div>
         </div>
+
+        {/* Two-factor authentication (TOTP) */}
+        <TotpSection
+          formData={formData}
+          setFormData={setFormData}
+          setHasChanges={setHasChanges}
+        />
 
         {/* Notes */}
         <div className="grid grid-cols-[80px_1fr] items-start gap-2">

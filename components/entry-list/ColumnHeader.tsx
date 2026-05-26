@@ -91,6 +91,12 @@ export function ColumnHeader({
       return;
     }
 
+    // 2FA column: fixed width — code + countdown ring + copy icon
+    if (columnId === 'totp') {
+      onColumnResize(columnId, 130);
+      return;
+    }
+
     // Timestamps: fixed format length
     if (columnId === 'created' || columnId === 'modified') {
       onColumnResize(columnId, 160);

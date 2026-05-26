@@ -15,6 +15,8 @@ import { useDraggable } from "@dnd-kit/core";
 import { useToast } from "@/components/ui/use-toast";
 import type { EntryData } from "@/lib/tauri";
 import type { ColumnConfig } from "./types";
+import { getTotpFieldValue } from "./types";
+import { TotpCell } from "./TotpCell";
 
 interface EntryListItemProps {
   entry: EntryData;
@@ -208,6 +210,18 @@ export function EntryListItem({
                         {entry.notes || "—"}
                       </p>
                     )}
+                    {col.id === 'totp' && (() => {
+                      const otp = getTotpFieldValue(entry);
+                      return (
+                        <div className="flex items-center px-1">
+                          {otp ? (
+                            <TotpCell otpValue={otp} />
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {col.id === 'created' && (
                       <p className="truncate text-sm text-muted-foreground px-1">
                         {formatTimestamp(entry.created)}
