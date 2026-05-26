@@ -29,14 +29,7 @@ import {
   type PendingCapture,
 } from "./pending-capture";
 import type { EntrySummary, StatusResult } from "../common/bridge";
-import {
-  Button,
-  Input,
-  Label,
-  LetterBadge,
-  Separator,
-  cn,
-} from "./ui";
+import { Button, Input, Label, LetterBadge, cn } from "./ui";
 
 type View = "this-site" | "all" | "generator";
 
@@ -112,14 +105,14 @@ export function Popup() {
       )}
 
       {view !== "generator" && (
-        <div className="border-b border-border bg-background px-3 pb-3 pt-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <div className="border-b border-border/70 bg-gradient-to-b from-card/40 to-transparent backdrop-blur-sm px-3.5 pb-3 pt-3">
+          <div className="relative group">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/80 transition-colors group-focus-within:text-primary" />
             <Input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search entries…"
-              className="pl-8 h-8"
+              className="pl-9 h-9 bg-background/80"
               autoFocus
             />
           </div>
@@ -653,66 +646,137 @@ function Generator() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  // Auto-generate once on mount.
+  // Auto-generate once on mount + whenever options change.
   useEffect(() => {
     void gen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [length, uppercase, lowercase, numbers, symbols]);
 
   return (
-    <div className="space-y-4 p-3">
-      <div className="flex items-stretch gap-1">
-        <div className="flex flex-1 items-center rounded-md border border-input bg-background px-2.5 py-2 font-mono text-xs break-all">
-          {password || <span className="text-muted-foreground">…</span>}
+    <div className="space-y-5 p-3.5 spm-fade-in">
+      {/* Password display */}
+      <div className="relative">
+        <div className="relative flex items-center justify-between gap-2 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/[0.06] to-transparent px-3 py-3 shadow-sm shadow-primary/5">
+          <code className="flex-1 break-all font-mono text-[13px] tracking-tight tabular-nums text-foreground">
+            {password || <span className="text-muted-foreground/70">Generating…</span>}
+          </code>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={gen}
+              disabled={busy}
+              title="Regenerate"
+              className="hover:bg-primary/10"
+            >
+              <RefreshCw
+                className={cn("h-3.5 w-3.5 text-primary", busy && "animate-spin")}
+              />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={copy}
+              title="Copy"
+              disabled={!password}
+              className="hover:bg-primary/10"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <Copy className="h-3.5 w-3.5 text-primary" />
+              )}
+            </Button>
+          </div>
         </div>
-        <Button variant="outline" size="icon" onClick={gen} disabled={busy} title="Regenerate">
-          <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
-        </Button>
-        <Button variant="outline" size="icon" onClick={copy} title="Copy" disabled={!password}>
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        </Button>
       </div>
 
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <Label>Length</Label>
-          <span className="text-xs font-medium text-foreground">{length}</span>
+      {/* Length slider */}
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between">
+          <Label className="text-foreground/80">Length</Label>
+          <span className="font-mono text-sm font-semibold tabular-nums text-primary">
+            {length}
+          </span>
         </div>
-        <input
-          type="range"
-          min={8}
-          max={64}
-          value={length}
-          onChange={(e) => setLength(Number(e.target.value))}
-          className="w-full accent-[hsl(var(--primary))]"
-        />
+        <SliderTrack value={length} min={8} max={64} onChange={setLength} />
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <Toggle label="Uppercase A-Z" checked={uppercase} onChange={setUppercase} />
-        <Toggle label="Lowercase a-z" checked={lowercase} onChange={setLowercase} />
-        <Toggle label="Digits 0-9" checked={numbers} onChange={setNumbers} />
-        <Toggle label="Symbols !@#" checked={symbols} onChange={setSymbols} />
+      {/* Charset toggles as pill chips */}
+      <div className="space-y-1.5">
+        <Label className="text-foreground/80">Characters</Label>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Chip label="A–Z" sub="Uppercase" checked={uppercase} onChange={setUppercase} />
+          <Chip label="a–z" sub="Lowercase" checked={lowercase} onChange={setLowercase} />
+          <Chip label="0–9" sub="Digits" checked={numbers} onChange={setNumbers} />
+          <Chip label="!@#" sub="Symbols" checked={symbols} onChange={setSymbols} />
+        </div>
       </div>
     </div>
   );
 }
 
-function Toggle(props: {
+function SliderTrack(props: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  const ratio = (props.value - props.min) / (props.max - props.min);
+  return (
+    <div className="relative h-5">
+      <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted/70" />
+      <div
+        className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-primary to-violet-500 shadow-sm shadow-primary/30 pointer-events-none"
+        style={{ left: 0, width: `${ratio * 100}%` }}
+      />
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        value={props.value}
+        onChange={(e) => props.onChange(Number(e.target.value))}
+        className="absolute inset-0 w-full cursor-pointer appearance-none bg-transparent [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-primary [&::-webkit-slider-thumb]:bg-background [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:shadow-primary/40 [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 active:[&::-webkit-slider-thumb]:scale-95"
+      />
+    </div>
+  );
+}
+
+function Chip(props: {
   label: string;
+  sub: string;
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-2 py-1.5 text-xs select-none hover:bg-accent/30">
-      <input
-        type="checkbox"
-        checked={props.checked}
-        onChange={(e) => props.onChange(e.target.checked)}
-        className="accent-[hsl(var(--primary))]"
-      />
-      <span>{props.label}</span>
-    </label>
+    <button
+      type="button"
+      onClick={() => props.onChange(!props.checked)}
+      className={cn(
+        "group flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-all duration-150",
+        "active:scale-[0.98]",
+        props.checked
+          ? "border-primary/40 bg-gradient-to-br from-primary/15 to-primary/5 text-foreground shadow-sm shadow-primary/10"
+          : "border-input bg-background/60 text-muted-foreground hover:border-input/80 hover:bg-accent/40",
+      )}
+    >
+      <span
+        className={cn(
+          "font-mono text-[11px] font-semibold transition-colors",
+          props.checked ? "text-primary" : "text-muted-foreground/80",
+        )}
+      >
+        {props.label}
+      </span>
+      <span
+        className={cn(
+          "text-[10px] uppercase tracking-wider transition-colors",
+          props.checked ? "text-foreground/80" : "text-muted-foreground/60",
+        )}
+      >
+        {props.sub}
+      </span>
+    </button>
   );
 }
 
@@ -812,7 +876,6 @@ function LockedScreen(props: { domain: string | null }) {
     const res = await focusApp();
     setBusy(false);
     if (res.ok) {
-      // Close the popup so Chrome doesn't steal focus back.
       window.close();
     } else {
       setError(res.error ?? "Could not bring the app to the front");
@@ -820,20 +883,37 @@ function LockedScreen(props: { domain: string | null }) {
   }
 
   return (
-    <div className="flex flex-col items-center gap-4 p-6 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-        <Lock className="h-5 w-5 text-primary" />
+    <div className="flex flex-col items-center gap-5 px-6 py-8 text-center spm-fade-in">
+      <div className="relative">
+        <div className="absolute inset-0 -m-3 rounded-full bg-primary/20 blur-2xl" />
+        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 to-primary/10 ring-1 ring-primary/25 shadow-lg shadow-primary/20">
+          <Lock className="h-6 w-6 text-primary" />
+        </div>
       </div>
-      <div>
-        <div className="text-sm font-medium">Database locked</div>
-        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-          {props.domain
-            ? `Unlock Simple Password Manager to autofill on ${props.domain}.`
-            : "Unlock Simple Password Manager to use this extension."}
+      <div className="space-y-1.5">
+        <div className="text-base font-semibold tracking-tight">
+          Vault is locked
+        </div>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {props.domain ? (
+            <>
+              Unlock Simple Password Manager to autofill on{" "}
+              <span className="font-medium text-foreground">{props.domain}</span>
+            </>
+          ) : (
+            "Unlock Simple Password Manager to use this extension."
+          )}
         </p>
       </div>
       <Button onClick={unlock} disabled={busy} className="w-full">
-        {busy ? "Bringing app to the front…" : "Open & unlock"}
+        {busy ? (
+          <>
+            <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+            Bringing app forward…
+          </>
+        ) : (
+          <>Open and unlock</>
+        )}
       </Button>
       {error && <p className="text-xs text-rose-600">{error}</p>}
     </div>
@@ -851,30 +931,28 @@ function SetupScreen(props: { message: string }) {
   }
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-amber-500/15">
+    <div className="spm-fade-in space-y-4 p-4">
+      <div className="relative flex items-start gap-3 rounded-xl border border-amber-500/25 bg-gradient-to-br from-amber-500/8 to-transparent p-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 ring-1 ring-amber-500/30">
           <Lock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
         </div>
         <div className="space-y-1">
-          <div className="text-sm font-medium">Not connected</div>
-          <p className="text-xs text-muted-foreground leading-relaxed">{props.message}</p>
+          <div className="text-sm font-semibold tracking-tight">Not connected</div>
+          <p className="text-xs leading-relaxed text-muted-foreground">{props.message}</p>
         </div>
       </div>
-
-      <Separator />
 
       <div>
         <Label className="mb-1.5 block">Your extension ID</Label>
         <div className="flex items-stretch gap-1">
-          <div className="flex flex-1 items-center rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-mono break-all">
+          <div className="flex flex-1 items-center rounded-lg border border-input bg-background/70 px-2.5 py-2 text-xs font-mono break-all">
             {extId}
           </div>
           <Button variant="outline" size="icon" onClick={copyId} title="Copy">
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
           </Button>
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
           Open Simple Password Manager →{" "}
           <span className="font-medium text-foreground">
             Settings → Application → Browser Extension
