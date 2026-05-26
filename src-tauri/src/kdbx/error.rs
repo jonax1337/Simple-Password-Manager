@@ -15,6 +15,7 @@ pub enum DatabaseError {
     EntryNotFound,
     #[error("Group not found")]
     GroupNotFound,
+    #[allow(dead_code)]
     #[error("Invalid UUID format")]
     InvalidUuid,
 }

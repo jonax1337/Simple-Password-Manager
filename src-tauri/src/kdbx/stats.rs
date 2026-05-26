@@ -1,4 +1,3 @@
-use keepass::db::{Group, Node};
 use sha1::{Sha1, Digest};
 
 use super::database::Database;
@@ -28,20 +27,10 @@ impl Database {
         (password.len() as f64) * (char_space as f64).log2()
     }
 
-    pub(super) fn count_groups(&self, group: &Group) -> usize {
-        let mut count = 1;
-        for node in &group.children {
-            if let Node::Group(g) = node {
-                count += self.count_groups(g);
-            }
-        }
-        count
-    }
-
     pub fn get_dashboard_stats(&self) -> DashboardStats {
         let all_entries = self.get_all_entries();
         let total_entries = all_entries.len();
-        let total_groups = self.count_groups(&self.db.root);
+        let total_groups = self.db.num_groups();
 
         let mut weak_passwords = 0;
         let mut old_passwords = 0;

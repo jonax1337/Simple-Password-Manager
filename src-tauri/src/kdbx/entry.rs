@@ -1,71 +1,75 @@
 use chrono::NaiveDateTime;
-use keepass::db::{Entry, Group, Node, Value, Times, History};
+use keepass::db::{fields, Entry, EntryId, EntryRef, History, Icon, Times};
 use uuid::Uuid;
 
 use super::database::Database;
 use super::error::DatabaseError;
 use super::types::{CustomField, EntryData, HistoryEntry};
 
+const FAVORITE_FIELD: &str = "_Favorite";
+const TAGS_FIELD: &str = "Tags";
+const STANDARD_FIELDS: &[&str] = &[
+    fields::TITLE,
+    fields::USERNAME,
+    fields::PASSWORD,
+    fields::URL,
+    fields::NOTES,
+    TAGS_FIELD,
+    FAVORITE_FIELD,
+];
+
 impl Database {
     pub fn get_entries_in_group(&self, group_uuid: &str) -> Result<Vec<EntryData>, DatabaseError> {
-        let group = self.find_group_by_uuid(group_uuid)?;
-        
-        let entries: Vec<EntryData> = group
-            .children
-            .iter()
-            .filter_map(|node| match node {
-                Node::Entry(e) => Some(self.convert_entry(e, group_uuid)),
-                _ => None,
-            })
+        let group_id = Self::parse_group_id(group_uuid)?;
+        let group = self.db.group(group_id).ok_or(DatabaseError::GroupNotFound)?;
+
+        let entries = group
+            .entries()
+            .map(|entry| Self::convert_entry(entry, group_uuid))
             .collect();
 
         Ok(entries)
     }
 
     pub fn get_all_entries(&self) -> Vec<EntryData> {
-        let mut entries = Vec::new();
-        self.collect_entries(&self.db.root, &mut entries);
-        entries
+        self.db
+            .iter_all_entries()
+            .map(|entry| {
+                let parent_uuid = entry.parent().id().uuid().to_string();
+                Self::convert_entry(entry, &parent_uuid)
+            })
+            .collect()
     }
 
-    pub(super) fn collect_entries(&self, group: &Group, entries: &mut Vec<EntryData>) {
-        let group_uuid = group.uuid.to_string();
-        
-        for node in &group.children {
-            match node {
-                Node::Entry(e) => entries.push(self.convert_entry(e, &group_uuid)),
-                Node::Group(g) => self.collect_entries(g, entries),
-            }
-        }
-    }
+    pub(super) fn convert_entry(entry: EntryRef<'_>, group_uuid: &str) -> EntryData {
+        let uuid = entry.id().uuid().to_string();
+        let is_favorite = entry.get(FAVORITE_FIELD).unwrap_or("") == "true";
 
-    pub(super) fn convert_entry(&self, entry: &Entry, group_uuid: &str) -> EntryData {
-        let uuid = entry.uuid.to_string();
-        let is_favorite = entry.get("_Favorite").unwrap_or("") == "true";
-        
-        // Extract timestamps and format them
-        let created = entry.times.get_creation().map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
-        let modified = entry.times.get_last_modification().map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
-        let last_accessed = entry.times.get_last_access().map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
-        // Format expiry without seconds for datetime-local compatibility
+        let created = entry
+            .times
+            .creation
+            .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
+        let modified = entry
+            .times
+            .last_modification
+            .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
+        let last_accessed = entry
+            .times
+            .last_access
+            .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
         // Add 1 hour to compensate for keepass-rs timezone conversion when reading
-        let expiry_time = entry.times.get_expiry().map(|t| {
-            let adjusted = *t + chrono::Duration::hours(1);
+        let expiry_time = entry.times.expiry.map(|t| {
+            let adjusted = t + chrono::Duration::hours(1);
             adjusted.format("%Y-%m-%dT%H:%M").to_string()
         });
-        
-        // Standard fields to exclude from custom fields
-        let standard_fields = ["Title", "UserName", "Password", "URL", "Notes", "Tags", "_Favorite"];
-        
-        // Extract custom fields
-        let custom_fields: Vec<CustomField> = entry.fields.iter()
-            .filter(|(key, _)| !standard_fields.contains(&key.as_str()))
+
+        let custom_fields: Vec<CustomField> = entry
+            .fields
+            .iter()
+            .filter(|(key, _)| !STANDARD_FIELDS.contains(&key.as_str()))
             .map(|(key, value)| {
-                let (val, protected) = match value {
-                    Value::Unprotected(s) => (s.clone(), false),
-                    Value::Protected(s) => (String::from_utf8_lossy(s.unsecure()).to_string(), true),
-                    Value::Bytes(b) => (String::from_utf8_lossy(b).to_string(), false),
-                };
+                let val = value.get().clone();
+                let protected = value.is_protected();
                 CustomField {
                     name: key.clone(),
                     value: val,
@@ -73,341 +77,256 @@ impl Database {
                 }
             })
             .collect();
-        
-        // Extract password history
-        let history: Vec<HistoryEntry> = if let Some(hist) = &entry.history {
-            hist.get_entries().iter()
-                .map(|h| {
-                    let timestamp = h.times.get_last_modification()
-                        .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string())
-                        .unwrap_or_else(|| "".to_string());
-                    
-                    HistoryEntry {
-                        timestamp,
+
+        let history: Vec<HistoryEntry> = entry
+            .history
+            .as_ref()
+            .map(|hist| {
+                hist.get_entries()
+                    .iter()
+                    .map(|h| HistoryEntry {
+                        timestamp: h
+                            .times
+                            .last_modification
+                            .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string())
+                            .unwrap_or_default(),
                         title: h.get_title().unwrap_or("").to_string(),
                         username: h.get_username().unwrap_or("").to_string(),
                         password: h.get_password().unwrap_or("").to_string(),
-                        url: h.get("URL").unwrap_or("").to_string(),
-                        notes: h.get("Notes").unwrap_or("").to_string(),
-                    }
-                })
-                .collect()
-        } else {
-            Vec::new()
+                        url: h.get(fields::URL).unwrap_or("").to_string(),
+                        notes: h.get(fields::NOTES).unwrap_or("").to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let icon_id = match entry.icon() {
+            Some(Icon::BuiltIn(id)) => Some(*id),
+            _ => None,
         };
-        
+
         EntryData {
             uuid,
             title: entry.get_title().unwrap_or("").to_string(),
             username: entry.get_username().unwrap_or("").to_string(),
             password: entry.get_password().unwrap_or("").to_string(),
-            url: entry.get("URL").unwrap_or("").to_string(),
-            notes: entry.get("Notes").unwrap_or("").to_string(),
-            tags: entry.get("Tags").unwrap_or("").to_string(),
+            url: entry.get(fields::URL).unwrap_or("").to_string(),
+            notes: entry.get(fields::NOTES).unwrap_or("").to_string(),
+            tags: entry.get(TAGS_FIELD).unwrap_or("").to_string(),
             group_uuid: group_uuid.to_string(),
-            icon_id: entry.icon_id,
+            icon_id,
             is_favorite,
             created,
             modified,
             last_accessed,
             expiry_time,
-            expires: entry.times.expires,
-            usage_count: entry.times.usage_count,
+            expires: entry.times.expires.unwrap_or(false),
+            usage_count: entry.times.usage_count.unwrap_or(0),
             custom_fields,
             history,
         }
     }
 
     pub fn get_entry(&self, entry_uuid: &str) -> Result<EntryData, DatabaseError> {
-        let entry = self.find_entry_by_uuid(entry_uuid)?;
-        let group_uuid = self.find_entry_group_uuid(entry_uuid)?;
-        Ok(self.convert_entry(entry, &group_uuid))
+        let entry_id = Self::parse_entry_id(entry_uuid)?;
+        let entry = self.db.entry(entry_id).ok_or(DatabaseError::EntryNotFound)?;
+        let group_uuid = entry.parent().id().uuid().to_string();
+        Ok(Self::convert_entry(entry, &group_uuid))
     }
 
     pub fn create_entry(&mut self, entry_data: EntryData) -> Result<(), DatabaseError> {
-        let group = self.find_group_by_uuid_mut(&entry_data.group_uuid)?;
-        
-        // Use provided UUID or generate a new one
-        let uuid = if entry_data.uuid.is_empty() {
-            Uuid::new_v4()
+        let group_id = Self::parse_group_id(&entry_data.group_uuid)?;
+
+        let entry_id = if entry_data.uuid.is_empty() {
+            EntryId::from_uuid(Uuid::new_v4())
         } else {
-            Uuid::parse_str(&entry_data.uuid).map_err(|_| DatabaseError::InvalidUuid)?
+            Self::parse_entry_id(&entry_data.uuid)?
         };
-        
-        let mut entry = Entry {
-            uuid,
-            history: None,
-            ..Default::default()
-        };
-        
-        // Set creation and modification timestamps
+
+        let mut group = self
+            .db
+            .group_mut(group_id)
+            .ok_or(DatabaseError::GroupNotFound)?;
+
+        let mut entry = group
+            .add_entry_with_id(entry_id)
+            .map_err(|_| DatabaseError::EntryNotFound)?;
+
         let now = Times::now();
-        entry.times.set_creation(now);
-        entry.times.set_last_modification(now);
-        entry.times.set_last_access(now);
-        
-        entry.fields.insert("Title".to_string(), Value::Unprotected(entry_data.title));
-        entry.fields.insert("UserName".to_string(), Value::Unprotected(entry_data.username));
-        entry.fields.insert("Password".to_string(), Value::Protected(entry_data.password.into()));
+        entry.times.creation = Some(now);
+        entry.times.last_modification = Some(now);
+        entry.times.last_access = Some(now);
+
+        entry.set_unprotected(fields::TITLE, entry_data.title);
+        entry.set_unprotected(fields::USERNAME, entry_data.username);
+        entry.set_protected(fields::PASSWORD, entry_data.password);
         if !entry_data.url.is_empty() {
-            entry.fields.insert("URL".to_string(), Value::Unprotected(entry_data.url));
+            entry.set_unprotected(fields::URL, entry_data.url);
         }
         if !entry_data.notes.is_empty() {
-            entry.fields.insert("Notes".to_string(), Value::Unprotected(entry_data.notes));
+            entry.set_unprotected(fields::NOTES, entry_data.notes);
         }
         if !entry_data.tags.is_empty() {
-            entry.fields.insert("Tags".to_string(), Value::Unprotected(entry_data.tags));
+            entry.set_unprotected(TAGS_FIELD, entry_data.tags);
         }
         if entry_data.is_favorite {
-            entry.fields.insert("_Favorite".to_string(), Value::Unprotected("true".to_string()));
+            entry.set_unprotected(FAVORITE_FIELD, "true");
         }
-        
-        // Add custom fields
+
         for field in entry_data.custom_fields {
-            let value = if field.protected {
-                Value::Protected(field.value.into())
+            if field.protected {
+                entry.set_protected(field.name, field.value);
             } else {
-                Value::Unprotected(field.value)
-            };
-            entry.fields.insert(field.name, value);
-        }
-        
-        // Set icon ID if provided
-        if let Some(icon_id) = entry_data.icon_id {
-            entry.icon_id = Some(icon_id);
-        }
-        
-        // Set expiry settings
-        entry.times.expires = entry_data.expires;
-        if entry_data.expires {
-            if let Some(expiry_str) = entry_data.expiry_time {
-                if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M") {
-                    // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                    expiry -= chrono::Duration::hours(1);
-                    entry.times.set_expiry(expiry);
-                } else if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M:%S") {
-                    // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                    expiry -= chrono::Duration::hours(1);
-                    entry.times.set_expiry(expiry);
-                }
+                entry.set_unprotected(field.name, field.value);
             }
         }
-        
-        group.add_child(entry);
+
+        if let Some(icon) = entry_data.icon_id {
+            entry.set_icon_builtin(icon);
+        }
+
+        entry.times.expires = Some(entry_data.expires);
+        if entry_data.expires {
+            if let Some(expiry_str) = entry_data.expiry_time {
+                entry.times.expiry = parse_expiry(&expiry_str);
+            }
+        }
+
         Ok(())
     }
 
     pub fn update_entry(&mut self, entry_data: EntryData) -> Result<(), DatabaseError> {
-        let entry = self.find_entry_by_uuid_mut(&entry_data.uuid)?;
-        
-        // Check if any field has changed
-        let title_changed = entry.get_title().unwrap_or("") != entry_data.title;
-        let username_changed = entry.get_username().unwrap_or("") != entry_data.username;
-        let password_changed = entry.get_password().unwrap_or("") != entry_data.password;
-        let url_changed = entry.get("URL").unwrap_or("") != entry_data.url;
-        let notes_changed = entry.get("Notes").unwrap_or("") != entry_data.notes;
-        let tags_changed = entry.get("Tags").unwrap_or("") != entry_data.tags;
-        
-        let any_change = title_changed || username_changed || password_changed || 
-                        url_changed || notes_changed || tags_changed;
-        
-        if any_change {
-            // Clone the current entry state before updating
-            let mut history_entry = entry.clone();
-            // Remove history from the history entry to avoid nested history
-            history_entry.history = None;
-            // Set the history entry's modification time to the current entry's last modification time
-            if let Some(last_mod) = entry.times.get_last_modification() {
-                history_entry.times.set_last_modification(*last_mod);
+        let entry_id = Self::parse_entry_id(&entry_data.uuid)?;
+
+        // Snapshot current state for the history entry, if any user-visible
+        // field is actually changing.
+        let history_snapshot: Option<Entry> = {
+            let current = self
+                .db
+                .entry(entry_id)
+                .ok_or(DatabaseError::EntryNotFound)?;
+            let any_change = current.get_title().unwrap_or("") != entry_data.title
+                || current.get_username().unwrap_or("") != entry_data.username
+                || current.get_password().unwrap_or("") != entry_data.password
+                || current.get(fields::URL).unwrap_or("") != entry_data.url
+                || current.get(fields::NOTES).unwrap_or("") != entry_data.notes
+                || current.get(TAGS_FIELD).unwrap_or("") != entry_data.tags;
+
+            if any_change {
+                let mut clone = (*current).clone();
+                clone.history = None;
+                Some(clone)
+            } else {
+                None
             }
-            // Add to history - initialize History if it doesn't exist
+        };
+
+        let mut entry = self
+            .db
+            .entry_mut(entry_id)
+            .ok_or(DatabaseError::EntryNotFound)?;
+
+        if let Some(snapshot) = history_snapshot {
             if let Some(ref mut hist) = entry.history {
-                hist.add_entry(history_entry);
+                hist.add_entry(snapshot);
             } else {
                 let mut new_history = History::default();
-                new_history.add_entry(history_entry);
+                new_history.add_entry(snapshot);
                 entry.history = Some(new_history);
             }
         }
-        
-        // Update modification and access timestamps
+
         let now = Times::now();
-        entry.times.set_last_modification(now);
-        entry.times.set_last_access(now);
-        
-        // Standard fields to keep
-        let standard_fields = ["Title", "UserName", "Password", "URL", "Notes", "Tags", "_Favorite"];
-        
-        // Remove old custom fields (keep only standard fields)
-        entry.fields.retain(|key, _| standard_fields.contains(&key.as_str()));
-        
-        entry.fields.insert("Title".to_string(), Value::Unprotected(entry_data.title));
-        entry.fields.insert("UserName".to_string(), Value::Unprotected(entry_data.username));
-        entry.fields.insert("Password".to_string(), Value::Protected(entry_data.password.into()));
-        entry.fields.insert("URL".to_string(), Value::Unprotected(entry_data.url));
-        entry.fields.insert("Notes".to_string(), Value::Unprotected(entry_data.notes));
-        entry.fields.insert("Tags".to_string(), Value::Unprotected(entry_data.tags));
-        
-        // Update favorite status
+        entry.times.last_modification = Some(now);
+        entry.times.last_access = Some(now);
+
+        // Drop existing non-standard fields, then write the desired state.
+        entry
+            .fields
+            .retain(|key, _| STANDARD_FIELDS.contains(&key.as_str()));
+
+        entry.set_unprotected(fields::TITLE, entry_data.title);
+        entry.set_unprotected(fields::USERNAME, entry_data.username);
+        entry.set_protected(fields::PASSWORD, entry_data.password);
+        entry.set_unprotected(fields::URL, entry_data.url);
+        entry.set_unprotected(fields::NOTES, entry_data.notes);
+        entry.set_unprotected(TAGS_FIELD, entry_data.tags);
+
         if entry_data.is_favorite {
-            entry.fields.insert("_Favorite".to_string(), Value::Unprotected("true".to_string()));
+            entry.set_unprotected(FAVORITE_FIELD, "true");
         } else {
-            entry.fields.remove("_Favorite");
+            entry.fields.remove(FAVORITE_FIELD);
         }
-        
-        // Add custom fields
+
         for field in entry_data.custom_fields {
-            let value = if field.protected {
-                Value::Protected(field.value.into())
+            if field.protected {
+                entry.set_protected(field.name, field.value);
             } else {
-                Value::Unprotected(field.value)
-            };
-            entry.fields.insert(field.name, value);
+                entry.set_unprotected(field.name, field.value);
+            }
         }
-        
-        // Update icon ID
-        entry.icon_id = entry_data.icon_id;
-        
-        // Update expiry settings
-        entry.times.expires = entry_data.expires;
+
+        if let Some(icon) = entry_data.icon_id {
+            entry.set_icon_builtin(icon);
+        } else {
+            entry.set_icon_none();
+        }
+
+        entry.times.expires = Some(entry_data.expires);
         if entry_data.expires {
-            // If expires is checked, we need to set an expiry time
             if let Some(expiry_str) = entry_data.expiry_time {
                 if !expiry_str.is_empty() {
-                    if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M") {
-                        // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                        expiry -= chrono::Duration::hours(1);
-                        entry.times.set_expiry(expiry);
-                    } else if let Ok(mut expiry) = NaiveDateTime::parse_from_str(&expiry_str, "%Y-%m-%dT%H:%M:%S") {
-                        // Subtract 1 hour to compensate for keepass-rs timezone conversion
-                        expiry -= chrono::Duration::hours(1);
-                        entry.times.set_expiry(expiry);
-                    }
+                    entry.times.expiry = parse_expiry(&expiry_str);
                 }
             }
         }
-        
+
         Ok(())
     }
 
     pub fn delete_entry(&mut self, entry_uuid: &str) -> Result<(), DatabaseError> {
-        let group_uuid = self.find_entry_group_uuid(entry_uuid)?;
-        let group = self.find_group_by_uuid_mut(&group_uuid)?;
-        
-        let uuid = Uuid::parse_str(entry_uuid).map_err(|_| DatabaseError::EntryNotFound)?;
-        group.children.retain(|node| {
-            if let Node::Entry(e) = node {
-                e.uuid != uuid
-            } else {
-                true
-            }
-        });
-        
+        let entry_id = Self::parse_entry_id(entry_uuid)?;
+        let entry = self
+            .db
+            .entry_mut(entry_id)
+            .ok_or(DatabaseError::EntryNotFound)?;
+        entry.remove();
         Ok(())
     }
 
-    pub fn move_entry(&mut self, entry_uuid: &str, new_group_uuid: &str) -> Result<(), DatabaseError> {
-        // Find the current group containing the entry
-        let current_group_uuid = self.find_entry_group_uuid(entry_uuid)?;
-        
-        // If already in the target group, do nothing
-        if current_group_uuid == new_group_uuid {
-            return Ok(());
-        }
-        
-        // Verify target group exists
-        let _ = self.find_group_by_uuid(new_group_uuid)?;
-        
-        let uuid = Uuid::parse_str(entry_uuid).map_err(|_| DatabaseError::EntryNotFound)?;
-        
-        // Remove entry from current group and obtain it
-        let entry_to_move: Entry = {
-            let current_group = self.find_group_by_uuid_mut(&current_group_uuid)?;
+    pub fn move_entry(
+        &mut self,
+        entry_uuid: &str,
+        new_group_uuid: &str,
+    ) -> Result<(), DatabaseError> {
+        let entry_id = Self::parse_entry_id(entry_uuid)?;
+        let new_group_id = Self::parse_group_id(new_group_uuid)?;
 
-            // Find the position of the entry within the current group's children
-            let index = current_group
-                .children
-                .iter()
-                .position(|node| matches!(node, Node::Entry(e) if e.uuid == uuid))
-                .ok_or(DatabaseError::EntryNotFound)?;
+        let mut entry = self
+            .db
+            .entry_mut(entry_id)
+            .ok_or(DatabaseError::EntryNotFound)?;
 
-            // Remove the node at the found index and extract the entry
-            match current_group.children.remove(index) {
-                Node::Entry(e) => e,
-                _ => unreachable!("Non-entry node found at entry position"),
-            }
-        };
-        
-        // Add entry to new group
-        let new_group = self.find_group_by_uuid_mut(new_group_uuid)?;
-        new_group.add_child(entry_to_move);
+        entry
+            .move_to(new_group_id)
+            .map_err(|_| DatabaseError::GroupNotFound)?;
         Ok(())
     }
 
-    pub(super) fn find_entry_by_uuid(&self, uuid: &str) -> Result<&Entry, DatabaseError> {
-        let uuid_parsed = Uuid::parse_str(uuid).map_err(|_| DatabaseError::EntryNotFound)?;
-        self.find_entry_recursive(&self.db.root, &uuid_parsed)
-            .ok_or(DatabaseError::EntryNotFound)
-    }
-
-    pub(super) fn find_entry_by_uuid_mut(&mut self, uuid: &str) -> Result<&mut Entry, DatabaseError> {
-        let uuid_parsed = Uuid::parse_str(uuid).map_err(|_| DatabaseError::EntryNotFound)?;
-        let root_ptr = &mut self.db.root as *mut Group;
-        unsafe { Self::find_entry_recursive_mut_static(&mut *root_ptr, &uuid_parsed) }
-            .ok_or(DatabaseError::EntryNotFound)
-    }
-
-    fn find_entry_recursive<'a>(&'a self, group: &'a Group, uuid: &Uuid) -> Option<&'a Entry> {
-        for node in &group.children {
-            match node {
-                Node::Entry(e) if &e.uuid == uuid => return Some(e),
-                Node::Group(g) => {
-                    if let Some(found) = self.find_entry_recursive(g, uuid) {
-                        return Some(found);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    fn find_entry_recursive_mut_static<'a>(
-        group: &'a mut Group,
-        uuid: &Uuid,
-    ) -> Option<&'a mut Entry> {
-        for node in &mut group.children {
-            match node {
-                Node::Entry(e) if &e.uuid == uuid => return Some(e),
-                Node::Group(g) => {
-                    if let Some(found) = Self::find_entry_recursive_mut_static(g, uuid) {
-                        return Some(found);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    pub(super) fn find_entry_group_uuid(&self, entry_uuid: &str) -> Result<String, DatabaseError> {
-        let uuid_parsed = Uuid::parse_str(entry_uuid).map_err(|_| DatabaseError::EntryNotFound)?;
-        self.find_entry_group_uuid_recursive(&self.db.root, &uuid_parsed)
-            .ok_or(DatabaseError::EntryNotFound)
-    }
-
-    fn find_entry_group_uuid_recursive(&self, group: &Group, uuid: &Uuid) -> Option<String> {
-        for node in &group.children {
-            match node {
-                Node::Entry(e) if &e.uuid == uuid => return Some(group.uuid.to_string()),
-                Node::Group(g) => {
-                    if let Some(found) = self.find_entry_group_uuid_recursive(g, uuid) {
-                        return Some(found);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
+    pub(super) fn parse_entry_id(uuid_str: &str) -> Result<EntryId, DatabaseError> {
+        Uuid::parse_str(uuid_str)
+            .map(EntryId::from_uuid)
+            .map_err(|_| DatabaseError::EntryNotFound)
     }
 }
+
+// Parse the frontend-supplied expiry string (datetime-local format, optionally
+// with seconds). We subtract one hour to compensate for the timezone shift
+// keepass-rs applies during write.
+fn parse_expiry(s: &str) -> Option<NaiveDateTime> {
+    let parsed = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M")
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+        .ok()?;
+    Some(parsed - chrono::Duration::hours(1))
+}
+
