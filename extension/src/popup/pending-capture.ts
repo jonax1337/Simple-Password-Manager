@@ -13,6 +13,7 @@ export interface PendingCapture {
   username: string;
   password: string;
   capturedAt: number;
+  intent?: "login" | "signup";
 }
 
 export async function readPendingCapture(): Promise<PendingCapture | null> {

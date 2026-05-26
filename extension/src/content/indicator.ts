@@ -176,34 +176,20 @@ function pillCss(): string {
       width: ${PILL_SIZE}px;
       height: ${PILL_SIZE}px;
       border-radius: 6px;
-      border: 1px solid transparent;
-      background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+      border: 1px solid hsl(250 55% 45%);
+      background: hsl(250 55% 50%);
       color: #fff;
       cursor: pointer;
-      box-shadow:
-        0 0 0 0 rgba(99, 102, 241, 0),
-        0 1px 2px rgba(0, 0, 0, 0.18),
-        0 4px 12px -2px rgba(99, 102, 241, 0.45);
-      transition:
-        background-position 220ms ease,
-        transform 140ms ease,
-        box-shadow 220ms ease,
-        filter 160ms ease;
-      background-size: 200% 100%;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.10);
+      transition: background 120ms ease, transform 120ms ease;
       padding: 0;
     }
     .pill:hover {
-      background-position: right center;
-      box-shadow:
-        0 0 0 3px rgba(99, 102, 241, 0.16),
-        0 1px 2px rgba(0, 0, 0, 0.18),
-        0 6px 16px -2px rgba(99, 102, 241, 0.55);
-      transform: scale(1.08);
+      background: hsl(250 55% 45%);
     }
     .pill:active,
     .pill.pressed {
-      transform: scale(0.94);
-      filter: brightness(0.95);
+      transform: scale(0.95);
     }
     svg { width: 12px; height: 12px; }
   `;

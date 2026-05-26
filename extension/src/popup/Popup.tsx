@@ -29,7 +29,7 @@ import {
   type PendingCapture,
 } from "./pending-capture";
 import type { EntrySummary, StatusResult } from "../common/bridge";
-import { Button, Input, Label, LetterBadge, cn } from "./ui";
+import { Button, Card, Input, Label, LetterBadge, Separator, cn } from "./ui";
 
 type View = "this-site" | "all" | "generator";
 
@@ -51,12 +51,10 @@ export function Popup() {
     });
   }, []);
 
-  // Watch for pending captures (login submissions waiting to be saved).
   useEffect(() => {
     return observePendingCapture(setPending);
   }, []);
 
-  // Default tab: if we have no http(s) tab, go straight to All.
   useEffect(() => {
     if (!domainLoading && !domain) {
       setView("all");
@@ -90,8 +88,14 @@ export function Popup() {
     }) ?? null;
 
   return (
-    <div className="flex flex-col bg-background text-foreground">
-      <Header dbName={status.database_name} domain={domain} loading={domainLoading} />
+    <div className="flex flex-col">
+      <Header
+        dbName={status.database_name}
+        domain={domain}
+        loading={domainLoading}
+      />
+
+      <Tabs view={view} setView={setView} hasDomain={!!domain} />
 
       {pending && (
         <SaveBanner
@@ -105,21 +109,21 @@ export function Popup() {
       )}
 
       {view !== "generator" && (
-        <div className="border-b border-border/70 bg-gradient-to-b from-card/40 to-transparent backdrop-blur-sm px-3.5 pb-3 pt-3">
-          <div className="relative group">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/80 transition-colors group-focus-within:text-primary" />
+        <div className="border-b bg-background px-3 py-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search entries…"
-              className="pl-9 h-9 bg-background/80"
+              className="pl-8 h-9"
               autoFocus
             />
           </div>
         </div>
       )}
 
-      <div className="min-h-[140px] max-h-[360px] overflow-y-auto">
+      <div className="min-h-[180px] max-h-[380px] overflow-y-auto">
         {view === "generator" ? (
           <Generator />
         ) : (
@@ -137,13 +141,11 @@ export function Popup() {
           />
         )}
       </div>
-
-      <Tabs view={view} setView={setView} hasDomain={!!domain} />
     </div>
   );
 }
 
-// -------------------------- subcomponents --------------------------
+// -------------------------- header --------------------------
 
 function Header(props: {
   dbName: string | null;
@@ -151,28 +153,25 @@ function Header(props: {
   loading: boolean;
 }) {
   return (
-    <header className="relative border-b border-border/70 bg-gradient-to-b from-card/60 to-card/20 backdrop-blur-sm px-4 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/10 ring-1 ring-primary/20 shadow-sm shadow-primary/10">
-            <KeyRound className="h-4 w-4 text-primary" />
-            <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none" />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold tracking-tight">
-              {props.dbName ?? "Simple Password Manager"}
-            </div>
-            <div className="truncate text-[11px] text-muted-foreground/90 font-medium">
-              {props.loading
-                ? "Connecting…"
-                : props.domain ?? "no http(s) tab"}
-            </div>
-          </div>
+    <header className="flex items-center gap-2.5 border-b bg-background px-3 py-3">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10">
+        <KeyRound className="h-4 w-4 text-primary" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold leading-tight">
+          {props.dbName ?? "Simple Password Manager"}
+        </div>
+        <div className="truncate text-xs text-muted-foreground leading-tight mt-0.5">
+          {props.loading
+            ? "Connecting…"
+            : props.domain ?? "No active site"}
         </div>
       </div>
     </header>
   );
 }
+
+// -------------------------- tabs --------------------------
 
 function Tabs(props: {
   view: View;
@@ -191,35 +190,105 @@ function Tabs(props: {
         disabled={disabled}
         onClick={() => props.setView(id)}
         className={cn(
-          "relative flex flex-1 flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-all duration-200",
+          "relative flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors",
           active
-            ? "text-primary"
+            ? "text-foreground"
             : "text-muted-foreground hover:text-foreground",
           disabled && "opacity-40 cursor-not-allowed",
         )}
       >
-        <Icon
-          className={cn(
-            "h-3.5 w-3.5 transition-transform duration-200",
-            active && "scale-110",
-          )}
-        />
-        <span className="tracking-tight">{label}</span>
+        <Icon className="h-3.5 w-3.5" />
+        <span>{label}</span>
         {active && (
-          <span className="absolute inset-x-3 top-0 h-[2px] rounded-b-full bg-gradient-to-r from-transparent via-primary to-transparent" />
+          <span className="absolute inset-x-0 bottom-0 h-px bg-foreground" />
         )}
       </button>
     );
   };
 
   return (
-    <nav className="flex border-t border-border/70 bg-gradient-to-t from-card/60 to-card/20 backdrop-blur-sm">
+    <nav className="flex border-b bg-background">
       {tab("this-site", "This site", Globe, !props.hasDomain)}
       {tab("all", "All", KeyRound)}
       {tab("generator", "Generate", Sparkles)}
     </nav>
   );
 }
+
+// -------------------------- save banner --------------------------
+
+function SaveBanner(props: {
+  pending: PendingCapture;
+  onSaved: () => void;
+  onDismiss: () => void;
+}) {
+  const [title, setTitle] = useState<string>(props.pending.domain);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isSignup = props.pending.intent === "signup";
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    const res = await createEntry({
+      title: title.trim() || props.pending.domain,
+      username: props.pending.username,
+      password: props.pending.password,
+      url: props.pending.url,
+    });
+    setBusy(false);
+    if (res.ok) {
+      await consumePendingCapture();
+      props.onSaved();
+    } else {
+      setError(res.error ?? "Could not save");
+    }
+  }
+
+  return (
+    <div className="border-b bg-muted/30 px-3 py-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Sparkles className="h-3.5 w-3.5 text-primary" />
+          {isSignup ? "Save this new account?" : "Save this login?"}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={props.onDismiss}
+          title="Discard"
+          className="h-6 w-6"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <p className="mb-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{props.pending.domain}</span>
+        {" · "}
+        <span className="font-medium text-foreground">
+          {props.pending.username || "(no username)"}
+        </span>
+      </p>
+      <Input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Entry title"
+        className="mb-2 h-8 text-xs"
+      />
+      <div className="flex gap-2">
+        <Button onClick={save} disabled={busy} size="sm" className="flex-1">
+          {busy ? "Saving…" : "Save to vault"}
+        </Button>
+        <Button variant="outline" onClick={props.onDismiss} size="sm">
+          Not now
+        </Button>
+      </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+// -------------------------- entry list --------------------------
 
 function EntryList(props: {
   entries: EntrySummary[] | null;
@@ -231,29 +300,27 @@ function EntryList(props: {
 }) {
   if (props.error) {
     return (
-      <p className="p-4 text-center text-sm text-rose-600 dark:text-rose-400">
-        {props.error}
-      </p>
+      <p className="p-4 text-center text-xs text-destructive">{props.error}</p>
     );
   }
   if (props.entries === null) {
     return (
-      <p className="p-4 text-center text-sm text-muted-foreground">
-        Loading…
-      </p>
+      <p className="p-4 text-center text-xs text-muted-foreground">Loading…</p>
     );
   }
   if (props.entries.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
-        <Lock className="h-6 w-6" />
-        {props.emptyMessage}
+      <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+        <Search className="h-5 w-5 text-muted-foreground/60" />
+        <p className="text-xs text-muted-foreground max-w-[220px]">
+          {props.emptyMessage}
+        </p>
       </div>
     );
   }
 
   return (
-    <ul className="divide-y divide-border">
+    <ul className="divide-y">
       {props.entries.map((e) => (
         <EntryRow
           key={e.uuid}
@@ -283,7 +350,6 @@ function EntryRow(props: {
   const [reveal, setReveal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Lazy-fetch the password when the row expands.
   useEffect(() => {
     if (!props.expanded || details) return;
     setRevealing(true);
@@ -298,42 +364,33 @@ function EntryRow(props: {
   }, [props.expanded, details, props.entry.uuid]);
 
   return (
-    <li className="spm-fade-in">
+    <li>
       <button
         onClick={props.onToggle}
         className={cn(
-          "group flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-all duration-150",
-          "hover:bg-accent/40 active:bg-accent/60",
-          props.expanded && "bg-accent/30",
+          "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent",
+          props.expanded && "bg-accent",
         )}
       >
         <LetterBadge title={props.entry.title || props.entry.url || "?"} size="md" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium tracking-tight">
+          <div className="truncate text-sm font-medium">
             {props.entry.title || "(untitled)"}
           </div>
-          <div className="truncate text-xs text-muted-foreground/90">
+          <div className="truncate text-xs text-muted-foreground">
             {props.entry.username || "—"}
           </div>
-        </div>
-        <div
-          className={cn(
-            "transition-transform duration-200 text-muted-foreground/60",
-            props.expanded ? "rotate-90" : "group-hover:translate-x-0.5",
-          )}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
         </div>
       </button>
 
       {props.expanded && (
-        <div className="spm-expand bg-gradient-to-b from-muted/30 to-muted/10 px-3.5 pb-3.5 pt-2 border-y border-border/40">
+        <div className="bg-muted/40 px-3 pb-3 pt-2">
           {error ? (
-            <p className="px-3 py-2 text-xs text-rose-600">{error}</p>
+            <p className="px-1 py-2 text-xs text-destructive">{error}</p>
           ) : revealing ? (
-            <p className="px-3 py-2 text-xs text-muted-foreground">Decrypting…</p>
+            <p className="px-1 py-2 text-xs text-muted-foreground">
+              Decrypting…
+            </p>
           ) : details ? (
             <div className="space-y-2.5">
               <FieldRow
@@ -348,7 +405,7 @@ function EntryRow(props: {
                 hidden={!reveal}
                 rightSlot={
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="icon"
                     onClick={() => setReveal((v) => !v)}
                     aria-label={reveal ? "Hide password" : "Show password"}
@@ -377,8 +434,51 @@ function EntryRow(props: {
   );
 }
 
+// -------------------------- field row + totp --------------------------
+
+function FieldRow(props: {
+  label: string;
+  value: string;
+  copyable?: boolean;
+  hidden?: boolean;
+  rightSlot?: React.ReactNode;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    if (!props.copyable) return;
+    await navigator.clipboard.writeText(props.value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  }
+
+  const display = props.hidden
+    ? "•".repeat(Math.min(props.value.length, 14))
+    : props.value;
+
+  return (
+    <div>
+      <Label className="mb-1 block">{props.label}</Label>
+      <div className="flex items-stretch gap-1">
+        <div className="flex flex-1 items-center rounded-md border bg-background px-2.5 py-1.5 text-xs font-mono break-all">
+          {display || <span className="text-muted-foreground">—</span>}
+        </div>
+        {props.copyable && (
+          <Button variant="outline" size="icon" onClick={copy} title="Copy">
+            {copied ? (
+              <Check className="h-3.5 w-3.5" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+          </Button>
+        )}
+        {props.rightSlot}
+      </div>
+    </div>
+  );
+}
+
 function TotpField(props: { entryUuid: string }) {
-  // null = not yet fetched. undefined = checked, no TOTP. object = present.
   const [totp, setTotp] = useState<
     | null
     | undefined
@@ -388,7 +488,6 @@ function TotpField(props: { entryUuid: string }) {
   const [tick, setTick] = useState(0);
   const [copied, setCopied] = useState(false);
 
-  // Initial + refresh fetch.
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -402,14 +501,11 @@ function TotpField(props: { entryUuid: string }) {
         });
         setTotpError(null);
       } else if (res.status === 404) {
-        // No TOTP configured — silently hide.
         setTotp(undefined);
         setTotpError(null);
       } else if (res.status === 422) {
         setTotp(undefined);
-        setTotpError(
-          "Stored 2FA value is malformed. Open the entry in the app and re-add your TOTP secret.",
-        );
+        setTotpError("Stored 2FA value is malformed.");
       } else {
         setTotp(undefined);
         setTotpError(res.error ?? "Could not read 2FA code");
@@ -421,14 +517,12 @@ function TotpField(props: { entryUuid: string }) {
     };
   }, [props.entryUuid]);
 
-  // 1Hz tick to update the countdown / refetch when expired.
   useEffect(() => {
     if (!totp) return;
-    const t = setInterval(() => setTick((n) => n + 1), 500);
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, [totp]);
 
-  // When the current code expires, refetch.
   useEffect(() => {
     if (!totp) return;
     const current = totp;
@@ -448,7 +542,7 @@ function TotpField(props: { entryUuid: string }) {
     return (
       <div>
         <Label className="mb-1 block">One-time code</Label>
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+        <p className="rounded-md border bg-background px-2.5 py-1.5 text-xs text-destructive">
           {totpError}
         </p>
       </div>
@@ -457,8 +551,6 @@ function TotpField(props: { entryUuid: string }) {
   if (totp === null || totp === undefined) return null;
   const current = totp;
   const remaining = Math.max(0, Math.ceil((current.expiresAt - Date.now()) / 1000));
-  const ratio = current.period > 0 ? remaining / current.period : 0;
-  const urgent = remaining <= 5;
 
   async function copy() {
     await navigator.clipboard.writeText(current.code);
@@ -470,109 +562,27 @@ function TotpField(props: { entryUuid: string }) {
     <div>
       <Label className="mb-1 block">One-time code</Label>
       <div className="flex items-stretch gap-1">
-        <div className="flex flex-1 items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 py-1.5">
-          <span className="font-mono text-base tracking-widest">
+        <div className="flex flex-1 items-center justify-between rounded-md border bg-background px-2.5 py-1.5">
+          <span className="font-mono text-sm tabular-nums tracking-wider">
             {current.code.slice(0, 3)} {current.code.slice(3)}
           </span>
-          <CountdownRing
-            ratio={ratio}
-            urgent={urgent}
-            label={String(remaining)}
-          />
+          <span className="text-[10px] font-medium tabular-nums text-muted-foreground">
+            {remaining}s
+          </span>
         </div>
         <Button variant="outline" size="icon" onClick={copy} title="Copy">
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
         </Button>
       </div>
     </div>
   );
 }
 
-function CountdownRing(props: { ratio: number; urgent: boolean; label: string }) {
-  const radius = 8;
-  const circumference = 2 * Math.PI * radius;
-  const dash = circumference * Math.max(0, Math.min(1, props.ratio));
-  return (
-    <div className="relative h-5 w-5">
-      <svg viewBox="0 0 20 20" className="h-5 w-5 -rotate-90">
-        <circle
-          cx="10"
-          cy="10"
-          r={radius}
-          stroke="currentColor"
-          className="text-border"
-          strokeWidth="2"
-          fill="none"
-        />
-        <circle
-          cx="10"
-          cy="10"
-          r={radius}
-          stroke="currentColor"
-          className={props.urgent ? "text-rose-500" : "text-primary"}
-          strokeWidth="2"
-          strokeDasharray={`${dash} ${circumference - dash}`}
-          strokeLinecap="round"
-          fill="none"
-        />
-      </svg>
-      <span
-        className={cn(
-          "absolute inset-0 flex items-center justify-center text-[9px] font-medium tabular-nums",
-          props.urgent && "text-rose-600",
-        )}
-      >
-        {props.label}
-      </span>
-    </div>
-  );
-}
-
-function FieldRow(props: {
-  label: string;
-  value: string;
-  copyable?: boolean;
-  hidden?: boolean;
-  rightSlot?: React.ReactNode;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    if (!props.copyable) return;
-    await navigator.clipboard.writeText(props.value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  }
-
-  const display = props.hidden ? "•".repeat(Math.min(props.value.length, 14)) : props.value;
-
-  return (
-    <div>
-      <Label className="mb-1 block">{props.label}</Label>
-      <div className="flex items-stretch gap-1">
-        <div
-          className={cn(
-            "flex flex-1 items-center rounded-md border border-input bg-background px-2 py-1.5 text-xs",
-            "font-mono break-all",
-          )}
-        >
-          {display || <span className="text-muted-foreground">—</span>}
-        </div>
-        {props.copyable && (
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={copy}
-            title="Copy"
-          >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          </Button>
-        )}
-        {props.rightSlot}
-      </div>
-    </div>
-  );
-}
+// -------------------------- fill button --------------------------
 
 function FillButton(props: {
   entry: EntrySummary;
@@ -597,7 +607,7 @@ function FillButton(props: {
           files: ["content.js"],
         });
       } catch {
-        /* may fail on chrome:// — sendMessage below will give a clearer error */
+        /* may fail on chrome:// */
       }
       await chrome.tabs.sendMessage(props.tabId, {
         kind: "fill",
@@ -613,14 +623,16 @@ function FillButton(props: {
   }
 
   return (
-    <div className="pt-1">
-      <Button onClick={fill} disabled={busy} className="w-full">
+    <div>
+      <Button onClick={fill} disabled={busy} size="sm" className="w-full">
         {busy ? "Filling…" : "Fill login form"}
       </Button>
-      {error && <p className="mt-1 text-xs text-rose-600">{error}</p>}
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
+
+// -------------------------- generator --------------------------
 
 function Generator() {
   const [length, setLength] = useState(20);
@@ -635,7 +647,13 @@ function Generator() {
   async function gen() {
     setBusy(true);
     setCopied(false);
-    const res = await generatePassword({ length, uppercase, lowercase, numbers, symbols });
+    const res = await generatePassword({
+      length,
+      uppercase,
+      lowercase,
+      numbers,
+      symbols,
+    });
     setBusy(false);
     if (res.ok && res.data) setPassword(res.data.password);
   }
@@ -646,212 +664,86 @@ function Generator() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  // Auto-generate once on mount + whenever options change.
   useEffect(() => {
     void gen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [length, uppercase, lowercase, numbers, symbols]);
 
   return (
-    <div className="space-y-5 p-3.5 spm-fade-in">
-      {/* Password display */}
-      <div className="relative">
-        <div className="relative flex items-center justify-between gap-2 rounded-xl border border-primary/20 bg-gradient-to-br from-primary/[0.06] to-transparent px-3 py-3 shadow-sm shadow-primary/5">
-          <code className="flex-1 break-all font-mono text-[13px] tracking-tight tabular-nums text-foreground">
-            {password || <span className="text-muted-foreground/70">Generating…</span>}
-          </code>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={gen}
-              disabled={busy}
-              title="Regenerate"
-              className="hover:bg-primary/10"
-            >
-              <RefreshCw
-                className={cn("h-3.5 w-3.5 text-primary", busy && "animate-spin")}
-              />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={copy}
-              title="Copy"
-              disabled={!password}
-              className="hover:bg-primary/10"
-            >
-              {copied ? (
-                <Check className="h-3.5 w-3.5 text-emerald-600" />
-              ) : (
-                <Copy className="h-3.5 w-3.5 text-primary" />
-              )}
-            </Button>
-          </div>
+    <div className="space-y-4 p-3">
+      <div className="flex items-stretch gap-1">
+        <div className="flex flex-1 items-center rounded-md border bg-background px-2.5 py-2 font-mono text-xs break-all">
+          {password || <span className="text-muted-foreground">…</span>}
         </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={gen}
+          disabled={busy}
+          title="Regenerate"
+        >
+          <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={copy}
+          title="Copy"
+          disabled={!password}
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+        </Button>
       </div>
 
-      {/* Length slider */}
       <div className="space-y-2">
-        <div className="flex items-baseline justify-between">
-          <Label className="text-foreground/80">Length</Label>
-          <span className="font-mono text-sm font-semibold tabular-nums text-primary">
-            {length}
-          </span>
+        <div className="flex items-center justify-between">
+          <Label>Length</Label>
+          <span className="text-xs font-medium tabular-nums">{length}</span>
         </div>
-        <SliderTrack value={length} min={8} max={64} onChange={setLength} />
+        <input
+          type="range"
+          min={8}
+          max={64}
+          value={length}
+          onChange={(e) => setLength(Number(e.target.value))}
+          className="w-full accent-primary"
+        />
       </div>
 
-      {/* Charset toggles as pill chips */}
-      <div className="space-y-1.5">
-        <Label className="text-foreground/80">Characters</Label>
-        <div className="grid grid-cols-2 gap-1.5">
-          <Chip label="A–Z" sub="Uppercase" checked={uppercase} onChange={setUppercase} />
-          <Chip label="a–z" sub="Lowercase" checked={lowercase} onChange={setLowercase} />
-          <Chip label="0–9" sub="Digits" checked={numbers} onChange={setNumbers} />
-          <Chip label="!@#" sub="Symbols" checked={symbols} onChange={setSymbols} />
+      <Separator />
+
+      <div className="space-y-2">
+        <Label>Characters</Label>
+        <div className="grid grid-cols-2 gap-2">
+          <Toggle label="ABC" checked={uppercase} onChange={setUppercase} />
+          <Toggle label="abc" checked={lowercase} onChange={setLowercase} />
+          <Toggle label="123" checked={numbers} onChange={setNumbers} />
+          <Toggle label="!@#" checked={symbols} onChange={setSymbols} />
         </div>
       </div>
     </div>
   );
 }
 
-function SliderTrack(props: {
-  value: number;
-  min: number;
-  max: number;
-  onChange: (v: number) => void;
-}) {
-  const ratio = (props.value - props.min) / (props.max - props.min);
-  return (
-    <div className="relative h-5">
-      <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-muted/70" />
-      <div
-        className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-primary to-violet-500 shadow-sm shadow-primary/30 pointer-events-none"
-        style={{ left: 0, width: `${ratio * 100}%` }}
-      />
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        value={props.value}
-        onChange={(e) => props.onChange(Number(e.target.value))}
-        className="absolute inset-0 w-full cursor-pointer appearance-none bg-transparent [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-primary [&::-webkit-slider-thumb]:bg-background [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:shadow-primary/40 [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110 active:[&::-webkit-slider-thumb]:scale-95"
-      />
-    </div>
-  );
-}
-
-function Chip(props: {
+function Toggle(props: {
   label: string;
-  sub: string;
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => props.onChange(!props.checked)}
-      className={cn(
-        "group flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-all duration-150",
-        "active:scale-[0.98]",
-        props.checked
-          ? "border-primary/40 bg-gradient-to-br from-primary/15 to-primary/5 text-foreground shadow-sm shadow-primary/10"
-          : "border-input bg-background/60 text-muted-foreground hover:border-input/80 hover:bg-accent/40",
-      )}
-    >
-      <span
-        className={cn(
-          "font-mono text-[11px] font-semibold transition-colors",
-          props.checked ? "text-primary" : "text-muted-foreground/80",
-        )}
-      >
-        {props.label}
-      </span>
-      <span
-        className={cn(
-          "text-[10px] uppercase tracking-wider transition-colors",
-          props.checked ? "text-foreground/80" : "text-muted-foreground/60",
-        )}
-      >
-        {props.sub}
-      </span>
-    </button>
-  );
-}
-
-// -------------------------- save banner --------------------------
-
-function SaveBanner(props: {
-  pending: PendingCapture;
-  onSaved: () => void;
-  onDismiss: () => void;
-}) {
-  const [title, setTitle] = useState<string>(props.pending.domain);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // ↓ trigger entrance animation
-  const className = "spm-slide-in-right relative overflow-hidden border-b border-primary/30";
-
-  async function save() {
-    setBusy(true);
-    setError(null);
-    const res = await createEntry({
-      title: title.trim() || props.pending.domain,
-      username: props.pending.username,
-      password: props.pending.password,
-      url: props.pending.url,
-    });
-    setBusy(false);
-    if (res.ok) {
-      await consumePendingCapture();
-      props.onSaved();
-    } else {
-      setError(res.error ?? "Could not save");
-    }
-  }
-
-  return (
-    <div className={className}>
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.08] via-primary/[0.04] to-transparent pointer-events-none" />
-      <div className="relative px-3.5 py-3">
-      <div className="mb-2.5 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <div className="flex h-5 w-5 items-center justify-center rounded-md bg-primary/15 ring-1 ring-primary/20">
-            <Sparkles className="h-3 w-3 text-primary" />
-          </div>
-          Save this login?
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={props.onDismiss}
-          title="Discard"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="mb-2 text-xs text-muted-foreground">
-        On <span className="font-medium text-foreground">{props.pending.domain}</span>{" "}
-        as <span className="font-medium text-foreground">{props.pending.username}</span>
-      </div>
-      <Input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="Title"
-        className="mb-2 h-8 text-xs"
+    <label className="flex cursor-pointer items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs hover:bg-accent">
+      <input
+        type="checkbox"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.target.checked)}
+        className="accent-primary"
       />
-      <div className="flex gap-2">
-        <Button onClick={save} disabled={busy} className="flex-1">
-          {busy ? "Saving…" : "Save to vault"}
-        </Button>
-        <Button variant="outline" onClick={props.onDismiss}>
-          Not now
-        </Button>
-      </div>
-      {error && <p className="mt-2 text-xs text-rose-600">{error}</p>}
-      </div>
-    </div>
+      <span className="font-mono">{props.label}</span>
+    </label>
   );
 }
 
@@ -859,8 +751,8 @@ function SaveBanner(props: {
 
 function LoadingScreen() {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 p-10 text-center text-sm text-muted-foreground">
-      <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    <div className="flex flex-col items-center justify-center gap-3 p-10 text-center text-xs text-muted-foreground">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
       Connecting…
     </div>
   );
@@ -883,40 +775,25 @@ function LockedScreen(props: { domain: string | null }) {
   }
 
   return (
-    <div className="flex flex-col items-center gap-5 px-6 py-8 text-center spm-fade-in">
-      <div className="relative">
-        <div className="absolute inset-0 -m-3 rounded-full bg-primary/20 blur-2xl" />
-        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 to-primary/10 ring-1 ring-primary/25 shadow-lg shadow-primary/20">
-          <Lock className="h-6 w-6 text-primary" />
+    <Card className="m-3 p-5">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+          <Lock className="h-4 w-4 text-muted-foreground" />
         </div>
-      </div>
-      <div className="space-y-1.5">
-        <div className="text-base font-semibold tracking-tight">
-          Vault is locked
+        <div className="space-y-1">
+          <div className="text-sm font-semibold">Vault is locked</div>
+          <p className="text-xs text-muted-foreground">
+            {props.domain
+              ? `Unlock Simple Password Manager to autofill on ${props.domain}.`
+              : "Unlock Simple Password Manager to use this extension."}
+          </p>
         </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {props.domain ? (
-            <>
-              Unlock Simple Password Manager to autofill on{" "}
-              <span className="font-medium text-foreground">{props.domain}</span>
-            </>
-          ) : (
-            "Unlock Simple Password Manager to use this extension."
-          )}
-        </p>
+        <Button onClick={unlock} disabled={busy} className="w-full mt-1">
+          {busy ? "Bringing app forward…" : "Open and unlock"}
+        </Button>
+        {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
-      <Button onClick={unlock} disabled={busy} className="w-full">
-        {busy ? (
-          <>
-            <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
-            Bringing app forward…
-          </>
-        ) : (
-          <>Open and unlock</>
-        )}
-      </Button>
-      {error && <p className="text-xs text-rose-600">{error}</p>}
-    </div>
+    </Card>
   );
 }
 
@@ -931,34 +808,38 @@ function SetupScreen(props: { message: string }) {
   }
 
   return (
-    <div className="spm-fade-in space-y-4 p-4">
-      <div className="relative flex items-start gap-3 rounded-xl border border-amber-500/25 bg-gradient-to-br from-amber-500/8 to-transparent p-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 ring-1 ring-amber-500/30">
-          <Lock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+    <div className="space-y-3 p-3">
+      <Card className="p-3">
+        <div className="flex items-start gap-2.5">
+          <Lock className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
+          <div className="space-y-1">
+            <div className="text-sm font-semibold">Not connected</div>
+            <p className="text-xs text-muted-foreground">{props.message}</p>
+          </div>
         </div>
-        <div className="space-y-1">
-          <div className="text-sm font-semibold tracking-tight">Not connected</div>
-          <p className="text-xs leading-relaxed text-muted-foreground">{props.message}</p>
-        </div>
-      </div>
+      </Card>
 
       <div>
         <Label className="mb-1.5 block">Your extension ID</Label>
         <div className="flex items-stretch gap-1">
-          <div className="flex flex-1 items-center rounded-lg border border-input bg-background/70 px-2.5 py-2 text-xs font-mono break-all">
+          <div className="flex flex-1 items-center rounded-md border bg-background px-2.5 py-1.5 text-xs font-mono break-all">
             {extId}
           </div>
           <Button variant="outline" size="icon" onClick={copyId} title="Copy">
-            {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? (
+              <Check className="h-3.5 w-3.5" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
           </Button>
         </div>
-        <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
+        <p className="mt-2 text-xs text-muted-foreground">
           Open Simple Password Manager →{" "}
           <span className="font-medium text-foreground">
             Settings → Application → Browser Extension
           </span>
-          , paste the ID, click <em>Register for all detected browsers</em>, then
-          restart this browser.
+          , paste the ID, click <em>Register for all detected browsers</em>,
+          then restart this browser.
         </p>
       </div>
     </div>
