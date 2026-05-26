@@ -16,7 +16,10 @@ struct Browser {
     label: &'static str,
     kind: BrowserKind,
     manifest_path: PathBuf,
-    /// Windows-only: HKCU\Software\<vendor>\NativeMessagingHosts\<host>
+    /// Windows-only: HKCU\Software\<vendor>\NativeMessagingHosts\<host>.
+    /// Unused on macOS / Linux because those platforms locate the host
+    /// manifest by file path instead of a registry vendor key.
+    #[cfg_attr(not(windows), allow(dead_code))]
     win_vendor: Option<&'static str>,
 }
 
