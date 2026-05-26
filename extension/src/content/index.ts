@@ -120,6 +120,112 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return false;
 });
 
+// ---------------- automatic fill on focus ----------------
+//
+// When the user clicks/tabs into a login field, ask the bridge for the
+// matching entry and fill the form. Skips if the field already has a value
+// (don't trample on what the user typed) and if the field looks like an OTP.
+
+let autofillTriedFor: string | null = null;
+
+async function tryAutofill(): Promise<void> {
+  const passwordField = findPasswordField();
+  if (!passwordField) return;
+
+  // If the page already has values, don't trample.
+  const usernameField = findUsernameField(passwordField);
+  if (passwordField.value || usernameField?.value) return;
+  if (looksLikeOtpField(passwordField, "")) return;
+
+  // De-duplicate: per-page, try once per (origin + form-element) combination.
+  const formKey =
+    window.location.origin + "|" + (passwordField.form?.id ?? "noform");
+  if (autofillTriedFor === formKey) return;
+  autofillTriedFor = formKey;
+
+  const host = window.location.hostname;
+  console.debug(LOG, "attempting autofill for", host);
+
+  // Get matching entries via the bridge (BG owns the bearer token).
+  const listResp: { ok: boolean; data?: { uuid: string; title: string }[] } =
+    await chrome.runtime
+      .sendMessage({
+        kind: "fetch",
+        method: "GET",
+        path: `/v1/entries?domain=${encodeURIComponent(host)}`,
+      })
+      .catch(() => ({ ok: false }));
+  if (!listResp?.ok || !listResp.data || listResp.data.length === 0) {
+    console.debug(LOG, "autofill: no matching entries");
+    return;
+  }
+
+  // First entry wins. The popup gives users a multi-pick UI; in-page
+  // autofill stays conservative.
+  const choice = listResp.data[0];
+  const pwResp: { ok: boolean; data?: { username: string; password: string } } =
+    await chrome.runtime
+      .sendMessage({
+        kind: "fetch",
+        method: "GET",
+        path: `/v1/entries/${encodeURIComponent(choice.uuid)}/password`,
+      })
+      .catch(() => ({ ok: false }));
+  if (!pwResp?.ok || !pwResp.data) return;
+
+  // Re-read fields — the DOM may have shifted since we started.
+  const pw = findPasswordField();
+  if (!pw || pw.value) return;
+  const un = findUsernameField(pw);
+  if (un?.value) return;
+
+  console.debug(LOG, "autofilling", choice.title || "(untitled)");
+  setNativeValue(pw, pwResp.data.password);
+  if (un && pwResp.data.username) {
+    setNativeValue(un, pwResp.data.username);
+  }
+}
+
+// Trigger autofill when the user focuses any login-form-ish input.
+document.addEventListener(
+  "focusin",
+  (event) => {
+    const t = event.target as HTMLElement | null;
+    if (!(t instanceof HTMLInputElement)) return;
+    const type = (t.type || "text").toLowerCase();
+    if (
+      type !== "password" &&
+      type !== "text" &&
+      type !== "email" &&
+      type !== "tel" &&
+      type !== "username"
+    ) {
+      return;
+    }
+    // OTP fields shouldn't trigger autofill either.
+    if (type === "password" && looksLikeOtpField(t, "")) return;
+    void tryAutofill();
+  },
+  true,
+);
+
+// SPAs sometimes mount the login form after our content script ran; we
+// also try on document_idle-ish equivalent if a password field appears
+// later. MutationObserver kept narrow so we don't churn on every DOM tweak.
+const observer = new MutationObserver(() => {
+  const pw = findPasswordField();
+  if (!pw) return;
+  // Only try when no field has focus yet — saves a roundtrip on every
+  // mutation in noisy SPAs.
+  if (document.activeElement instanceof HTMLInputElement) {
+    const ae = document.activeElement;
+    if (ae === pw || ae.type === "text" || ae.type === "email") {
+      void tryAutofill();
+    }
+  }
+});
+observer.observe(document.documentElement, { subtree: true, childList: true });
+
 // ---------------- fill on demand ----------------
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
