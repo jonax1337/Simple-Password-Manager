@@ -102,7 +102,7 @@ function wireUp(
   function dismiss() {
     host.remove();
     // Explicit user action: don't pester them again via the popup.
-    void chrome.runtime.sendMessage({ kind: "consume-pending-capture" }).catch(() => {});
+    void chrome.storage.local.remove("pending_capture").catch(() => {});
   }
 
   async function save() {
@@ -127,7 +127,7 @@ function wireUp(
     if (resp?.ok) {
       // Clear the pending-capture stash so the popup doesn't double-prompt.
       try {
-        await chrome.runtime.sendMessage({ kind: "consume-pending-capture" });
+        await chrome.storage.local.remove("pending_capture");
       } catch {
         /* may not exist; that's fine */
       }
@@ -141,7 +141,7 @@ function wireUp(
   async function never() {
     await blockDomain(input.domain);
     try {
-      await chrome.runtime.sendMessage({ kind: "consume-pending-capture" });
+      await chrome.storage.local.remove("pending_capture");
     } catch {
       /* */
     }

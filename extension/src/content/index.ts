@@ -21,15 +21,6 @@ interface FillMessage {
   password: string;
 }
 
-interface CaptureMessage {
-  kind: "capture";
-  domain: string;
-  url: string;
-  username: string;
-  password: string;
-  intent: Intent;
-}
-
 console.debug(LOG, "content script loaded on", window.location.hostname);
 
 // Blocklist gets loaded into memory once at startup so the submit-time path
@@ -57,8 +48,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // When a submit causes a navigation, the banner injected on the old page
 // is gone. The BG-stashed capture surfaces here on the destination page.
 
-// Content scripts can't read chrome.storage.session in MV3 (it's a
-// trusted-context area). Instead we ask the BG via runtime messaging.
+// We use chrome.storage.local for the pending capture (not .session) so
+// the content script can read AND write it directly. The BG service worker
+// observes the same storage area for badge updates. Persistence to disk is
+// bounded by a 5-minute TTL + an on-startup cleanup in the BG.
+const PENDING_KEY = "pending_capture";
+
 async function maybeShowFromPending(): Promise<void> {
   let cap:
     | null
@@ -71,10 +66,10 @@ async function maybeShowFromPending(): Promise<void> {
         intent?: Intent;
       } = null;
   try {
-    const resp = await chrome.runtime.sendMessage({ kind: "get-pending-capture" });
-    cap = resp?.data ?? null;
+    const res = await chrome.storage.local.get(PENDING_KEY);
+    cap = res?.[PENDING_KEY] ?? null;
   } catch (e) {
-    console.debug(LOG, "get-pending-capture error:", e);
+    console.debug(LOG, "storage.local.get error:", e);
     return;
   }
   if (!cap) return;
@@ -105,10 +100,17 @@ async function maybeShowFromPending(): Promise<void> {
 
 void maybeShowFromPending();
 
-// BG broadcasts a `capture-available` message to every tab whenever it
-// stashes a fresh capture in session storage. Content scripts that were
-// already alive on the destination page when this lands re-render their
-// banner.
+// Listen for storage.local changes — content scripts CAN see this area's
+// onChanged events, so we re-check pending whenever it changes (covers
+// the case where the BG itself wrote it via a different path).
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (!(PENDING_KEY in changes)) return;
+  if (changes[PENDING_KEY]?.newValue === undefined) return;
+  void maybeShowFromPending();
+});
+
+// BG also still broadcasts capture-available; harmless redundancy.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if ((msg as { kind?: string })?.kind === "capture-available") {
     void maybeShowFromPending();
@@ -175,24 +177,27 @@ function captureNow(reason: string): void {
   const intent = detectIntent(passwordField);
   console.debug(LOG, "captured", { reason, domain, intent, username });
 
-  const payload: CaptureMessage = {
-    kind: "capture",
+  // Persist DIRECTLY to chrome.storage.local from the content script. This
+  // works reliably even if the form's submit causes an immediate navigation
+  // — Chrome flushes the storage write before tearing down our context.
+  // Sending via chrome.runtime.sendMessage as a side channel would be
+  // racy because the BG service worker may not process the message before
+  // our tab dies.
+  const pending = {
     domain,
     url,
     username,
     password,
     intent,
+    capturedAt: Date.now(),
   };
-
-  // Fire-and-forget to BG so the popup also has access. The .catch is
-  // there because the BG can refuse messages from disappearing tabs.
-  chrome.runtime.sendMessage(payload).catch((err) => {
-    console.debug(LOG, "sendMessage(capture) error:", err);
+  void chrome.storage.local.set({ [PENDING_KEY]: pending }).catch((err) => {
+    console.debug(LOG, "storage.local.set error:", err);
   });
 
   // Inject the banner synchronously on the current page. Will be torn down
-  // if the page navigates; the BG-stashed capture above gives us a
-  // second chance on the destination page via maybeShowFromPending().
+  // if the page navigates; the persisted capture gives us a second chance
+  // on the destination page via maybeShowFromPending().
   try {
     showInlineBanner({ domain, url, username, password, intent });
   } catch (e) {

@@ -16,20 +16,27 @@ import {
 } from "../common/bridge";
 
 const PENDING_CAPTURE_KEY = "pending_capture";
+const CAPTURE_TTL_MS = 5 * 60_000;
 
-// Content scripts can't see chrome.storage.session unless the extension
-// explicitly opens it up. Without this, maybeShowFromPending() in the
-// content script returns nothing — the banner appears once on the login
-// page and never resurfaces on the MFA / 2FA destination page.
+// Wipe any pending capture left over from a previous browser session —
+// chrome.storage.local persists to disk, unlike .session. Keeping a stale
+// captured password across a browser restart would be a security regression.
 void (async () => {
   try {
-    await chrome.storage.session.setAccessLevel({
-      accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS",
-    });
+    const existing = await chrome.storage.local.get(PENDING_CAPTURE_KEY);
+    const cap = existing?.[PENDING_CAPTURE_KEY];
+    if (
+      !cap ||
+      typeof cap.capturedAt !== "number" ||
+      Date.now() - cap.capturedAt > CAPTURE_TTL_MS
+    ) {
+      await chrome.storage.local.remove(PENDING_CAPTURE_KEY);
+      await setBadge("");
+    } else {
+      await setBadge("+");
+    }
   } catch {
-    /* older Chrome versions reject the call — fail-safe, just means the
-       inline banner on the next page won't appear, but the popup-side
-       save banner still works. */
+    /* non-fatal */
   }
 })();
 
@@ -150,10 +157,10 @@ chrome.runtime.onMessage.addListener(
           await handleCapture(msg);
           sendResponse({ ok: true });
         } else if (msg.kind === "get-pending-capture") {
-          const res = await chrome.storage.session.get(PENDING_CAPTURE_KEY);
+          const res = await chrome.storage.local.get(PENDING_CAPTURE_KEY);
           sendResponse({ ok: true, data: res?.[PENDING_CAPTURE_KEY] ?? null });
         } else if (msg.kind === "consume-pending-capture") {
-          await chrome.storage.session.remove(PENDING_CAPTURE_KEY);
+          await chrome.storage.local.remove(PENDING_CAPTURE_KEY);
           sendResponse({ ok: true });
         } else {
           sendResponse({ ok: false, error: "unknown message kind" });
@@ -187,7 +194,7 @@ function broadcastCaptureAvailable(): void {
 // next open. Also paint a "+" badge on the extension icon so the user knows
 // something's waiting.
 async function handleCapture(msg: CaptureMessage): Promise<void> {
-  await chrome.storage.session.set({
+  await chrome.storage.local.set({
     [PENDING_CAPTURE_KEY]: {
       domain: msg.domain,
       url: msg.url,
@@ -210,20 +217,26 @@ async function setBadge(text: string): Promise<void> {
   }
 }
 
-// Clear the badge whenever the popup empties the pending capture.
+// Badge tracks pending captures. Either the BG itself writes them (when
+// the capture arrives via runtime message) or the content script writes
+// directly to storage.local (fire-and-forget reliability) — either way we
+// update the badge from the same storage event.
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "session") return;
+  if (areaName !== "local") return;
   if (!(PENDING_CAPTURE_KEY in changes)) return;
   const newValue = changes[PENDING_CAPTURE_KEY]?.newValue;
   if (newValue === undefined) {
     void setBadge("");
+  } else {
+    void setBadge("+");
+    broadcastCaptureAvailable();
   }
 });
 
 // On install / start-up, make sure the badge reflects whatever was already
 // stashed in storage. Service workers can be re-spawned cold.
 async function restoreBadge() {
-  const v = await chrome.storage.session.get(PENDING_CAPTURE_KEY);
+  const v = await chrome.storage.local.get(PENDING_CAPTURE_KEY);
   if (v?.[PENDING_CAPTURE_KEY]) {
     void setBadge("+");
   } else {
