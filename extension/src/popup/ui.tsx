@@ -1,6 +1,7 @@
 // Plain shadcn-style primitives — no gradients, no glows, no AI-spice.
 
 import * as React from "react";
+import { Check } from "lucide-react";
 
 export function cn(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
@@ -110,6 +111,77 @@ export function Separator(props: { className?: string }) {
       className={cn("h-px w-full bg-border", props.className)}
       role="separator"
     />
+  );
+}
+
+// ---------- Checkbox ----------
+// shadcn-style: 16px square that flips bg-primary + check icon when on.
+// Hidden native input keeps it form-submittable and keyboard-friendly.
+
+export function Checkbox(props: {
+  checked: boolean;
+  onCheckedChange: (v: boolean) => void;
+  id?: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={props.checked}
+      id={props.id}
+      onClick={() => props.onCheckedChange(!props.checked)}
+      className={cn(
+        "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-primary",
+        "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        props.checked
+          ? "bg-primary text-primary-foreground"
+          : "bg-background hover:bg-accent",
+        props.className,
+      )}
+    >
+      {props.checked && <Check className="h-3 w-3" strokeWidth={3} />}
+    </button>
+  );
+}
+
+// ---------- Slider ----------
+// Range input with the native thumb hidden, an overlay track + filled
+// portion + circular thumb rendered in shadcn tokens. Drag still works
+// because the native input sits on top with opacity-0.
+
+export function Slider(props: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+  className?: string;
+}) {
+  const ratio = (props.value - props.min) / (props.max - props.min);
+  return (
+    <div className={cn("relative flex h-5 w-full items-center", props.className)}>
+      {/* track */}
+      <div className="absolute inset-x-0 h-1.5 rounded-full bg-muted" />
+      {/* filled portion */}
+      <div
+        className="pointer-events-none absolute left-0 h-1.5 rounded-full bg-primary"
+        style={{ width: `${ratio * 100}%` }}
+      />
+      {/* thumb */}
+      <div
+        className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 rounded-full border-2 border-primary bg-background shadow-sm"
+        style={{ left: `${ratio * 100}%` }}
+      />
+      {/* invisible native range eats the drag input */}
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        value={props.value}
+        onChange={(e) => props.onChange(Number(e.target.value))}
+        className="relative z-10 h-5 w-full cursor-pointer appearance-none bg-transparent opacity-0"
+      />
+    </div>
   );
 }
 

@@ -29,7 +29,17 @@ import {
   type PendingCapture,
 } from "./pending-capture";
 import type { EntrySummary, StatusResult } from "../common/bridge";
-import { Button, Card, Input, Label, LetterBadge, Separator, cn } from "./ui";
+import {
+  Button,
+  Card,
+  Checkbox,
+  Input,
+  Label,
+  LetterBadge,
+  Separator,
+  Slider,
+  cn,
+} from "./ui";
 
 type View = "this-site" | "all" | "generator";
 
@@ -200,7 +210,7 @@ function Tabs(props: {
         <Icon className="h-3.5 w-3.5" />
         <span>{label}</span>
         {active && (
-          <span className="absolute inset-x-0 bottom-0 h-px bg-foreground" />
+          <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />
         )}
       </button>
     );
@@ -699,19 +709,14 @@ function Generator() {
         </Button>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
           <Label>Length</Label>
-          <span className="text-xs font-medium tabular-nums">{length}</span>
+          <span className="text-xs font-semibold tabular-nums text-foreground">
+            {length}
+          </span>
         </div>
-        <input
-          type="range"
-          min={8}
-          max={64}
-          value={length}
-          onChange={(e) => setLength(Number(e.target.value))}
-          className="w-full accent-primary"
-        />
+        <Slider value={length} min={8} max={64} onChange={setLength} />
       </div>
 
       <Separator />
@@ -719,31 +724,30 @@ function Generator() {
       <div className="space-y-2">
         <Label>Characters</Label>
         <div className="grid grid-cols-2 gap-2">
-          <Toggle label="ABC" checked={uppercase} onChange={setUppercase} />
-          <Toggle label="abc" checked={lowercase} onChange={setLowercase} />
-          <Toggle label="123" checked={numbers} onChange={setNumbers} />
-          <Toggle label="!@#" checked={symbols} onChange={setSymbols} />
+          <CharsetToggle label="ABC" checked={uppercase} onChange={setUppercase} />
+          <CharsetToggle label="abc" checked={lowercase} onChange={setLowercase} />
+          <CharsetToggle label="123" checked={numbers} onChange={setNumbers} />
+          <CharsetToggle label="!@#" checked={symbols} onChange={setSymbols} />
         </div>
       </div>
     </div>
   );
 }
 
-function Toggle(props: {
+function CharsetToggle(props: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs hover:bg-accent">
-      <input
-        type="checkbox"
-        checked={props.checked}
-        onChange={(e) => props.onChange(e.target.checked)}
-        className="accent-primary"
-      />
+    <button
+      type="button"
+      onClick={() => props.onChange(!props.checked)}
+      className="flex items-center gap-2.5 rounded-md border bg-background px-2.5 py-2 text-xs transition-colors hover:bg-accent"
+    >
+      <Checkbox checked={props.checked} onCheckedChange={props.onChange} />
       <span className="font-mono">{props.label}</span>
-    </label>
+    </button>
   );
 }
 
