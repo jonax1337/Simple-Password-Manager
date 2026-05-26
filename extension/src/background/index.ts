@@ -149,6 +149,12 @@ chrome.runtime.onMessage.addListener(
         } else if (msg.kind === "capture") {
           await handleCapture(msg);
           sendResponse({ ok: true });
+        } else if (msg.kind === "get-pending-capture") {
+          const res = await chrome.storage.session.get(PENDING_CAPTURE_KEY);
+          sendResponse({ ok: true, data: res?.[PENDING_CAPTURE_KEY] ?? null });
+        } else if (msg.kind === "consume-pending-capture") {
+          await chrome.storage.session.remove(PENDING_CAPTURE_KEY);
+          sendResponse({ ok: true });
         } else {
           sendResponse({ ok: false, error: "unknown message kind" });
         }
@@ -159,6 +165,23 @@ chrome.runtime.onMessage.addListener(
     return true;
   },
 );
+
+// Push notification to every loaded tab when a new capture is stashed, so
+// the content scripts on already-open tabs can render the banner without
+// polling. (chrome.storage.onChanged only fires inside contexts that have
+// storage access — content scripts can't rely on it for `session`.)
+function broadcastCaptureAvailable(): void {
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      chrome.tabs
+        .sendMessage(tab.id, { kind: "capture-available" })
+        .catch(() => {
+          /* tab may not have a content script loaded — ignore */
+        });
+    }
+  });
+}
 
 // Stash a captured login in session storage so the popup can pick it up on
 // next open. Also paint a "+" badge on the extension icon so the user knows
@@ -171,9 +194,11 @@ async function handleCapture(msg: CaptureMessage): Promise<void> {
       username: msg.username,
       password: msg.password,
       capturedAt: Date.now(),
+      intent: msg.intent,
     },
   });
   await setBadge("+");
+  broadcastCaptureAvailable();
 }
 
 async function setBadge(text: string): Promise<void> {

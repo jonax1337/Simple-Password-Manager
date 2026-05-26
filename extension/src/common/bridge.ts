@@ -55,7 +55,18 @@ export interface CaptureMessage {
 /** Background-script message envelope. */
 export type BgMessage =
   | { kind: "get-bridge"; force?: boolean }
-  | { kind: "fetch"; method: "GET" | "POST"; path: string; body?: unknown };
+  | { kind: "fetch"; method: "GET" | "POST"; path: string; body?: unknown }
+  | { kind: "get-pending-capture" }
+  | { kind: "consume-pending-capture" };
+
+export interface PendingCaptureData {
+  domain: string;
+  url: string;
+  username: string;
+  password: string;
+  capturedAt: number;
+  intent: "login" | "signup";
+}
 
 export interface BgResponse<T> {
   ok: boolean;

@@ -57,11 +57,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // When a submit causes a navigation, the banner injected on the old page
 // is gone. The BG-stashed capture surfaces here on the destination page.
 
+// Content scripts can't read chrome.storage.session in MV3 (it's a
+// trusted-context area). Instead we ask the BG via runtime messaging.
 async function maybeShowFromPending(): Promise<void> {
-  if (!chrome.storage?.session) return;
-  const res = await chrome.storage.session.get("pending_capture");
-  const cap = res?.pending_capture as
-    | undefined
+  let cap:
+    | null
     | {
         domain: string;
         url: string;
@@ -69,7 +69,14 @@ async function maybeShowFromPending(): Promise<void> {
         password: string;
         capturedAt: number;
         intent?: Intent;
-      };
+      } = null;
+  try {
+    const resp = await chrome.runtime.sendMessage({ kind: "get-pending-capture" });
+    cap = resp?.data ?? null;
+  } catch (e) {
+    console.debug(LOG, "get-pending-capture error:", e);
+    return;
+  }
   if (!cap) return;
   // 5 minutes is long enough for a sluggish MFA challenge or a captcha,
   // short enough that the stale token from a previous session doesn't pop
@@ -98,13 +105,17 @@ async function maybeShowFromPending(): Promise<void> {
 
 void maybeShowFromPending();
 
-// Also listen for changes to session storage in case the BG hasn't written
-// the capture yet by the time the content script first checks above.
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "session") return;
-  if (!("pending_capture" in changes)) return;
-  if (changes.pending_capture?.newValue === undefined) return;
-  void maybeShowFromPending();
+// BG broadcasts a `capture-available` message to every tab whenever it
+// stashes a fresh capture in session storage. Content scripts that were
+// already alive on the destination page when this lands re-render their
+// banner.
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if ((msg as { kind?: string })?.kind === "capture-available") {
+    void maybeShowFromPending();
+    sendResponse({ ok: true });
+    return false;
+  }
+  return false;
 });
 
 // ---------------- fill on demand ----------------
