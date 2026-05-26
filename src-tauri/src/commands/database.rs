@@ -1,5 +1,5 @@
-use crate::kdbx::{Database, GroupData, KdfInfo};
-use crate::state::AppState;
+use simple_password_manager::kdbx::{Database, GroupData, KdfInfo};
+use simple_password_manager::state::AppState;
 use std::io::Read;
 use std::path::PathBuf;
 use tauri::State;

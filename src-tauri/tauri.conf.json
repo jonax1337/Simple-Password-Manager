@@ -94,7 +94,9 @@
             "core:window:allow-minimize",
             "core:window:allow-start-dragging",
             "core:event:allow-emit",
-            "dialog:allow-ask"
+            "dialog:allow-ask",
+            "updater:default",
+            "process:allow-restart"
           ]
         },
         {

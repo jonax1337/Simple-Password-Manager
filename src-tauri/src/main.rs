@@ -1,11 +1,9 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod bridge;
 mod commands;
-mod kdbx;
-mod state;
-mod totp;
+
+use simple_password_manager::{bridge, state};
 
 use state::AppState;
 use std::sync::{Arc, Mutex};
@@ -14,6 +12,27 @@ use tauri::Manager;
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
 use tauri::menu::{Menu, MenuItem};
 use tauri_plugin_autostart::MacosLauncher;
+
+// Tauri-aware impl of the bridge's FocusController trait. Kept in the bin
+// crate so the lib stays free of WebView/Tauri runtime types.
+struct TauriFocusController {
+    app_handle: tauri::AppHandle,
+}
+
+impl bridge::FocusController for TauriFocusController {
+    fn focus_main_window(&self) {
+        let Some(window) = self.app_handle.get_webview_window("main") else {
+            return;
+        };
+        let _ = window.unminimize();
+        let _ = window.show();
+        // Windows refuses focus-steal from a background process unless
+        // we toggle always-on-top briefly — same trick KeePassXC uses.
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
+        let _ = window.set_always_on_top(false);
+    }
+}
 
 fn main() {
     tauri::Builder::default()
@@ -133,8 +152,10 @@ fn main() {
             // exit, and remove_bridge_file() in the exit path handles cleanup.
             let app_handle = app.handle().clone();
             let db_handle = app.state::<AppState>().database.clone();
+            let focus_controller: Arc<dyn bridge::FocusController> =
+                Arc::new(TauriFocusController { app_handle });
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = launch_bridge(app_handle, db_handle).await {
+                if let Err(e) = launch_bridge(focus_controller, db_handle).await {
                     eprintln!("[bridge] failed to start: {}", e);
                 }
             });
@@ -153,10 +174,10 @@ fn main() {
 }
 
 async fn launch_bridge(
-    app_handle: tauri::AppHandle,
+    focus_controller: Arc<dyn bridge::FocusController>,
     db_handle: state::DatabaseHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let bridge_file = bridge::start(db_handle, app_handle).await?;
+    let bridge_file = bridge::start(db_handle, focus_controller).await?;
 
     let dir = bridge::bridge_state_dir()
         .ok_or("could not determine local data dir for bridge.json")?;

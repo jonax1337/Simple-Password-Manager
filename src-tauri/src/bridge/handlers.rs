@@ -415,21 +415,11 @@ pub async fn check_entry(
 // entries — 1Password-style "click Unlock to flip to the app".
 
 pub async fn focus_app(State(state): State<BridgeState>) -> StatusCode {
-    use tauri::Manager;
-
-    let Some(window) = state.app_handle.get_webview_window("main") else {
-        return StatusCode::INTERNAL_SERVER_ERROR;
+    let Some(focus) = state.focus_controller.as_ref() else {
+        // Reached only from tests that omit the Tauri runtime.
+        return StatusCode::SERVICE_UNAVAILABLE;
     };
-
-    let _ = window.unminimize();
-    let _ = window.show();
-    // Windows can refuse focus-steal from a non-foreground process unless
-    // we toggle always-on-top briefly. This is what most "bring window to
-    // front" helpers do and matches the behaviour KeePassXC uses.
-    let _ = window.set_always_on_top(true);
-    let _ = window.set_focus();
-    let _ = window.set_always_on_top(false);
-
+    focus.focus_main_window();
     StatusCode::OK
 }
 
@@ -458,4 +448,121 @@ where
 #[allow(dead_code)]
 fn _audited<R: IntoResponse>(r: R) -> R {
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -------- extract_host --------
+
+    #[test]
+    fn extract_host_strips_scheme() {
+        assert_eq!(extract_host("https://example.com"), "example.com");
+        assert_eq!(extract_host("http://example.com"), "example.com");
+        assert_eq!(extract_host("ftp://example.com"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_strips_path_query_fragment() {
+        assert_eq!(extract_host("https://example.com/login"), "example.com");
+        assert_eq!(extract_host("https://example.com?x=1"), "example.com");
+        assert_eq!(extract_host("https://example.com#frag"), "example.com");
+        assert_eq!(extract_host("https://example.com/a/b?x=1#f"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_strips_port() {
+        assert_eq!(extract_host("https://example.com:8443"), "example.com");
+        assert_eq!(extract_host("example.com:80"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_strips_userinfo() {
+        assert_eq!(extract_host("https://user:pass@example.com"), "example.com");
+        assert_eq!(extract_host("https://user@example.com"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_strips_www_prefix() {
+        assert_eq!(extract_host("https://www.example.com"), "example.com");
+        assert_eq!(extract_host("www.example.com"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_keeps_subdomains_other_than_www() {
+        assert_eq!(extract_host("https://accounts.example.com"), "accounts.example.com");
+        assert_eq!(extract_host("https://api.foo.example.com"), "api.foo.example.com");
+    }
+
+    #[test]
+    fn extract_host_handles_missing_scheme() {
+        assert_eq!(extract_host("example.com"), "example.com");
+        assert_eq!(extract_host("example.com/path"), "example.com");
+    }
+
+    #[test]
+    fn extract_host_empty() {
+        assert_eq!(extract_host(""), "");
+    }
+
+    // -------- matches_domain --------
+
+    #[test]
+    fn matches_domain_exact() {
+        assert!(matches_domain("https://example.com", "example.com"));
+    }
+
+    #[test]
+    fn matches_domain_subdomain_of_entry() {
+        // entry has accounts.example.com, request for example.com matches
+        assert!(matches_domain("https://accounts.example.com", "example.com"));
+    }
+
+    #[test]
+    fn matches_domain_subdomain_of_request() {
+        // entry has example.com, request from accounts.example.com matches
+        assert!(matches_domain("https://example.com", "accounts.example.com"));
+    }
+
+    #[test]
+    fn matches_domain_case_insensitive() {
+        assert!(matches_domain("https://Example.COM", "example.com"));
+        assert!(matches_domain("https://example.com", "EXAMPLE.com"));
+    }
+
+    #[test]
+    fn matches_domain_strips_www() {
+        assert!(matches_domain("https://www.example.com", "example.com"));
+    }
+
+    #[test]
+    fn matches_domain_rejects_unrelated() {
+        assert!(!matches_domain("https://evil.com", "example.com"));
+        assert!(!matches_domain("https://example.com", "evil.com"));
+    }
+
+    #[test]
+    fn matches_domain_does_not_confuse_suffix() {
+        // "notexample.com" should NOT match "example.com"
+        assert!(!matches_domain("https://notexample.com", "example.com"));
+        assert!(!matches_domain("https://example.com.evil.com", "example.com"));
+    }
+
+    #[test]
+    fn matches_domain_rejects_empty() {
+        assert!(!matches_domain("", "example.com"));
+        assert!(!matches_domain("https://example.com", ""));
+        assert!(!matches_domain("", ""));
+    }
+
+    #[test]
+    fn matches_domain_with_port_in_url() {
+        assert!(matches_domain("https://example.com:8443/login", "example.com"));
+    }
+
+    #[test]
+    fn matches_domain_with_userinfo_in_url() {
+        assert!(matches_domain("https://user:pw@example.com/login", "example.com"));
+    }
 }

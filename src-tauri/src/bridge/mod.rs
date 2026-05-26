@@ -17,7 +17,7 @@ pub use server::start;
 #[allow(unused_imports)]
 pub use auth::{read_bridge_file, BridgeFile, BRIDGE_FILE_NAME};
 #[allow(unused_imports)]
-pub use server::BridgeState;
+pub use server::{router, BridgeState, FocusController};
 
 use std::path::PathBuf;
 

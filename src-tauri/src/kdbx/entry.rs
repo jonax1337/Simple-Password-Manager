@@ -330,3 +330,318 @@ fn parse_expiry(s: &str) -> Option<NaiveDateTime> {
     Some(parsed - chrono::Duration::hours(1))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kdbx::types::CustomField;
+    use tempfile::TempDir;
+
+    fn fresh_db() -> (TempDir, Database) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("entry_tests.kdbx");
+        let db = Database::create(path, "pw".into()).unwrap();
+        (dir, db)
+    }
+
+    fn make_entry(group_uuid: &str, title: &str) -> EntryData {
+        EntryData {
+            uuid: String::new(),
+            title: title.into(),
+            username: "alice".into(),
+            password: "s3cr3t".into(),
+            url: "https://example.com".into(),
+            notes: "n".into(),
+            tags: "personal".into(),
+            group_uuid: group_uuid.into(),
+            icon_id: None,
+            is_favorite: false,
+            created: None,
+            modified: None,
+            last_accessed: None,
+            expiry_time: None,
+            expires: false,
+            usage_count: 0,
+            custom_fields: Vec::new(),
+            history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn create_entry_persists_all_standard_fields() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(make_entry(&root, "Example")).unwrap();
+
+        let entries = db.get_entries_in_group(&root).unwrap();
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e.title, "Example");
+        assert_eq!(e.username, "alice");
+        assert_eq!(e.password, "s3cr3t");
+        assert_eq!(e.url, "https://example.com");
+        assert_eq!(e.notes, "n");
+        assert_eq!(e.tags, "personal");
+        assert!(e.created.is_some());
+        assert!(e.modified.is_some());
+        assert!(!e.is_favorite);
+    }
+
+    #[test]
+    fn create_entry_with_explicit_uuid_keeps_it() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = make_entry(&root, "X");
+        e.uuid = "11111111-1111-1111-1111-111111111111".into();
+        db.create_entry(e).unwrap();
+
+        let got = db.get_entry("11111111-1111-1111-1111-111111111111").unwrap();
+        assert_eq!(got.title, "X");
+    }
+
+    #[test]
+    fn create_entry_with_bad_group_uuid_fails() {
+        let (_dir, mut db) = fresh_db();
+        let res = db.create_entry(make_entry("not-a-uuid", "X"));
+        assert!(matches!(res, Err(DatabaseError::GroupNotFound)));
+    }
+
+    #[test]
+    fn create_entry_with_favorite_flag() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = make_entry(&root, "Fav");
+        e.is_favorite = true;
+        db.create_entry(e).unwrap();
+
+        let got = &db.get_entries_in_group(&root).unwrap()[0];
+        assert!(got.is_favorite);
+    }
+
+    #[test]
+    fn create_entry_with_custom_fields_protected_and_unprotected() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = make_entry(&root, "X");
+        e.custom_fields = vec![
+            CustomField {
+                name: "Recovery".into(),
+                value: "code-123".into(),
+                protected: false,
+            },
+            CustomField {
+                name: "PIN".into(),
+                value: "9999".into(),
+                protected: true,
+            },
+        ];
+        db.create_entry(e).unwrap();
+
+        let got = &db.get_entries_in_group(&root).unwrap()[0];
+        let by_name: std::collections::HashMap<_, _> =
+            got.custom_fields.iter().map(|f| (f.name.as_str(), f)).collect();
+        assert_eq!(by_name["Recovery"].value, "code-123");
+        assert!(!by_name["Recovery"].protected);
+        assert_eq!(by_name["PIN"].value, "9999");
+        assert!(by_name["PIN"].protected);
+    }
+
+    #[test]
+    fn update_entry_changes_fields() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(make_entry(&root, "Old")).unwrap();
+        let uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        let mut updated = make_entry(&root, "New");
+        updated.uuid = uuid.clone();
+        updated.password = "rotated".into();
+        db.update_entry(updated).unwrap();
+
+        let got = db.get_entry(&uuid).unwrap();
+        assert_eq!(got.title, "New");
+        assert_eq!(got.password, "rotated");
+    }
+
+    #[test]
+    fn update_entry_snapshots_previous_into_history() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(make_entry(&root, "Initial")).unwrap();
+        let uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        let mut updated = make_entry(&root, "Initial");
+        updated.uuid = uuid.clone();
+        updated.password = "changed".into();
+        db.update_entry(updated).unwrap();
+
+        let got = db.get_entry(&uuid).unwrap();
+        assert_eq!(got.history.len(), 1, "history should have one snapshot");
+        assert_eq!(got.history[0].password, "s3cr3t", "snapshot has the OLD password");
+    }
+
+    #[test]
+    fn update_entry_with_no_visible_changes_does_not_grow_history() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(make_entry(&root, "Same")).unwrap();
+        let uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        let mut same = make_entry(&root, "Same");
+        same.uuid = uuid.clone();
+        db.update_entry(same).unwrap();
+
+        let got = db.get_entry(&uuid).unwrap();
+        assert_eq!(got.history.len(), 0);
+    }
+
+    #[test]
+    fn update_entry_drops_removed_custom_fields() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = make_entry(&root, "X");
+        e.custom_fields = vec![CustomField {
+            name: "Recovery".into(),
+            value: "abc".into(),
+            protected: false,
+        }];
+        db.create_entry(e).unwrap();
+        let uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        let mut update = make_entry(&root, "X");
+        update.uuid = uuid.clone();
+        // No custom_fields this time → previous custom field should be gone.
+        db.update_entry(update).unwrap();
+
+        let got = db.get_entry(&uuid).unwrap();
+        assert!(got.custom_fields.is_empty());
+    }
+
+    #[test]
+    fn update_entry_clears_favorite_when_unset() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = make_entry(&root, "X");
+        e.is_favorite = true;
+        db.create_entry(e).unwrap();
+        let uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        let mut unfav = make_entry(&root, "X");
+        unfav.uuid = uuid.clone();
+        unfav.is_favorite = false;
+        db.update_entry(unfav).unwrap();
+
+        assert!(!db.get_entry(&uuid).unwrap().is_favorite);
+    }
+
+    #[test]
+    fn delete_entry_removes_it() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(make_entry(&root, "X")).unwrap();
+        let uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        db.delete_entry(&uuid).unwrap();
+        assert!(db.get_entry(&uuid).is_err());
+    }
+
+    #[test]
+    fn move_entry_changes_group() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("Sub".into(), Some(root.clone()), None).unwrap();
+        let sub_uuid = db.get_root_group().children[0].uuid.clone();
+
+        db.create_entry(make_entry(&root, "X")).unwrap();
+        let entry_uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        db.move_entry(&entry_uuid, &sub_uuid).unwrap();
+
+        assert!(db.get_entries_in_group(&root).unwrap().is_empty());
+        assert_eq!(db.get_entries_in_group(&sub_uuid).unwrap().len(), 1);
+        assert_eq!(db.get_entry(&entry_uuid).unwrap().group_uuid, sub_uuid);
+    }
+
+    #[test]
+    fn move_entry_to_nonexistent_group_fails() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(make_entry(&root, "X")).unwrap();
+        let uuid = db.get_entries_in_group(&root).unwrap()[0].uuid.clone();
+
+        let err = db
+            .move_entry(&uuid, "00000000-0000-0000-0000-000000000000")
+            .unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+
+    #[test]
+    fn delete_entry_with_bad_uuid_fails() {
+        let (_dir, mut db) = fresh_db();
+        let err = db.delete_entry("not-a-uuid").unwrap_err();
+        assert!(matches!(err, DatabaseError::EntryNotFound));
+    }
+
+    #[test]
+    fn expiry_roundtrip_compensates_for_timezone_shift() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = make_entry(&root, "Expiring");
+        e.expires = true;
+        e.expiry_time = Some("2030-06-15T10:30".into());
+        db.create_entry(e).unwrap();
+
+        let got = &db.get_entries_in_group(&root).unwrap()[0];
+        assert!(got.expires);
+        assert_eq!(got.expiry_time.as_deref(), Some("2030-06-15T10:30"));
+    }
+
+    #[test]
+    fn icon_roundtrip() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = make_entry(&root, "X");
+        e.icon_id = Some(42);
+        db.create_entry(e).unwrap();
+
+        let got = &db.get_entries_in_group(&root).unwrap()[0];
+        assert_eq!(got.icon_id, Some(42));
+    }
+
+    #[test]
+    fn get_all_entries_walks_subtree() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("Sub".into(), Some(root.clone()), None).unwrap();
+        let sub = db.get_root_group().children[0].uuid.clone();
+
+        db.create_entry(make_entry(&root, "A")).unwrap();
+        db.create_entry(make_entry(&sub, "B")).unwrap();
+
+        let all = db.get_all_entries();
+        assert_eq!(all.len(), 2);
+        let titles: Vec<_> = all.iter().map(|e| e.title.as_str()).collect();
+        assert!(titles.contains(&"A"));
+        assert!(titles.contains(&"B"));
+    }
+
+    #[test]
+    fn parse_expiry_accepts_with_and_without_seconds() {
+        let a = parse_expiry("2030-01-02T03:04").unwrap();
+        let b = parse_expiry("2030-01-02T03:04:00").unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn parse_expiry_subtracts_one_hour() {
+        let parsed = parse_expiry("2030-01-02T10:00").unwrap();
+        // 10:00 input → 09:00 stored
+        assert_eq!(parsed.format("%H:%M").to_string(), "09:00");
+    }
+
+    #[test]
+    fn parse_expiry_rejects_garbage() {
+        assert!(parse_expiry("not a date").is_none());
+        assert!(parse_expiry("").is_none());
+    }
+}
+

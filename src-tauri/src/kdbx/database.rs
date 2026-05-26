@@ -30,12 +30,7 @@ impl Database {
             .to_string();
 
         let mut config = DatabaseConfig::default();
-        config.kdf_config = KdfConfig::Argon2id {
-            iterations: 2,
-            memory: 64 * 1024 * 1024,
-            parallelism: 2,
-            version: Argon2Version::Version13,
-        };
+        config.kdf_config = default_kdf_config();
 
         let mut db = KeepassDatabase::with_config(config);
         db.meta.database_name = Some(db_name.clone());
@@ -65,10 +60,14 @@ impl Database {
         let key = DatabaseKey::new().with_password(secret_password.expose_secret());
 
         let db = KeepassDatabase::open(&mut file, key).map_err(|e| {
-            if e.to_string().contains("Invalid credentials") {
+            // keepass 0.13.x surfaces a wrong-password failure as "Incorrect key";
+            // pre-0.13 used "Invalid credentials". We keep both so a future
+            // upstream rename doesn't silently downgrade to a generic OpenError.
+            let msg = e.to_string();
+            if msg.contains("Incorrect key") || msg.contains("Invalid credentials") {
                 DatabaseError::InvalidCredentials
             } else {
-                DatabaseError::OpenError(e.to_string())
+                DatabaseError::OpenError(msg)
             }
         })?;
 
@@ -261,13 +260,137 @@ impl Database {
     }
 
     pub fn upgrade_kdf_parameters(&mut self) -> Result<(), DatabaseError> {
-        self.db.config.kdf_config = KdfConfig::Argon2id {
-            iterations: 2,
-            memory: 64 * 1024 * 1024,
-            parallelism: 2,
-            version: Argon2Version::Version13,
-        };
+        self.db.config.kdf_config = default_kdf_config();
         self.save()?;
         Ok(())
+    }
+}
+
+// Production: OWASP-recommended Argon2id (64 MB, 2 iter, 2 lanes).
+// Tests: fast settings so the full suite stays under a few seconds —
+// we're testing format correctness, not KDF strength.
+#[cfg(not(test))]
+fn default_kdf_config() -> KdfConfig {
+    KdfConfig::Argon2id {
+        iterations: 2,
+        memory: 64 * 1024 * 1024,
+        parallelism: 2,
+        version: Argon2Version::Version13,
+    }
+}
+
+#[cfg(test)]
+fn default_kdf_config() -> KdfConfig {
+    KdfConfig::Argon2id {
+        iterations: 1,
+        memory: 1024 * 1024, // 1 MB
+        parallelism: 1,
+        version: Argon2Version::Version13,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn fresh_db() -> (TempDir, Database) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.kdbx");
+        let db = Database::create(path, "correct horse".into()).unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn create_writes_file_to_disk() {
+        let (dir, db) = fresh_db();
+        assert!(db.path.exists());
+        assert!(db.last_modified.is_some());
+        drop(dir);
+    }
+
+    #[test]
+    fn create_uses_filename_as_database_name() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("MyVault.kdbx");
+        let db = Database::create(path, "pw".into()).unwrap();
+        assert_eq!(db.db.meta.database_name.as_deref(), Some("MyVault"));
+        assert_eq!(db.db.root().name, "MyVault");
+    }
+
+    #[test]
+    fn open_with_correct_password_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("vault.kdbx");
+        let _db = Database::create(path.clone(), "secret".into()).unwrap();
+        let reopened = Database::open(path, "secret".into()).unwrap();
+        assert_eq!(reopened.db.root().name, "vault");
+    }
+
+    #[test]
+    fn open_with_wrong_password_returns_invalid_credentials() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("vault.kdbx");
+        let _ = Database::create(path.clone(), "secret".into()).unwrap();
+        let err = Database::open(path, "wrong".into()).err().unwrap();
+        assert!(
+            matches!(err, DatabaseError::InvalidCredentials),
+            "expected InvalidCredentials, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn open_with_missing_file_returns_open_error() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("does_not_exist.kdbx");
+        let err = Database::open(path, "x".into()).err().unwrap();
+        assert!(matches!(err, DatabaseError::OpenError(_)));
+    }
+
+    #[test]
+    fn save_updates_last_modified() {
+        let (_dir, mut db) = fresh_db();
+        let first = db.last_modified;
+        // Sleep to ensure mtime resolution sees a difference on Windows (100ns)
+        // and Linux ext4 (1s). 1.1s covers both.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        db.save().unwrap();
+        assert!(db.last_modified > first);
+    }
+
+    #[test]
+    fn check_for_changes_false_when_only_we_wrote() {
+        let (_dir, db) = fresh_db();
+        assert!(!db.check_for_changes().unwrap());
+    }
+
+    #[test]
+    fn check_for_changes_detects_external_write() {
+        let (_dir, db) = fresh_db();
+        // Sleep past the filesystem mtime resolution (Linux ext4 = 1s).
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Rewrite the file's bytes from "outside" the Database struct.
+        let bytes = std::fs::read(&db.path).unwrap();
+        std::fs::write(&db.path, bytes).unwrap();
+        assert!(db.check_for_changes().unwrap());
+    }
+
+    #[test]
+    fn kdf_info_reports_argon2id() {
+        let (_dir, db) = fresh_db();
+        let kdf = db.get_kdf_info();
+        assert_eq!(kdf.kdf_type, "Argon2id");
+        // In test mode KDF is intentionally weak.
+        assert!(kdf.is_weak);
+    }
+
+    #[test]
+    fn root_group_is_returned() {
+        let (_dir, db) = fresh_db();
+        let root = db.get_root_group();
+        assert_eq!(root.name, "test");
+        assert!(root.parent_uuid.is_none());
+        assert!(root.children.is_empty());
     }
 }

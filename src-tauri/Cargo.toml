@@ -45,3 +45,8 @@ path = "src/bin/browser_bridge_host.rs"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }

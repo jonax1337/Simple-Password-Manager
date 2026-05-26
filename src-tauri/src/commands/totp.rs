@@ -28,7 +28,7 @@ pub fn preview_totp(input: String) -> Result<TotpPreview, String> {
 
     let (result, uri) = if trimmed.starts_with("otpauth://") {
         (
-            crate::totp::from_otpauth_uri(trimmed).map_err(totp_error_message)?,
+            simple_password_manager::totp::from_otpauth_uri(trimmed).map_err(totp_error_message)?,
             trimmed.to_string(),
         )
     } else {
@@ -39,7 +39,7 @@ pub fn preview_totp(input: String) -> Result<TotpPreview, String> {
             .filter(|c| !c.is_whitespace())
             .collect::<String>()
             .to_ascii_uppercase();
-        let result = crate::totp::from_raw_secret(&cleaned).map_err(totp_error_message)?;
+        let result = simple_password_manager::totp::from_raw_secret(&cleaned).map_err(totp_error_message)?;
         let uri = format!(
             "otpauth://totp/Password%20Manager?secret={}&period=30&digits=6&algorithm=SHA1",
             cleaned
@@ -56,11 +56,11 @@ pub fn preview_totp(input: String) -> Result<TotpPreview, String> {
     })
 }
 
-fn totp_error_message(e: crate::totp::TotpError) -> String {
+fn totp_error_message(e: simple_password_manager::totp::TotpError) -> String {
     match e {
-        crate::totp::TotpError::NoSecret => "secret missing".into(),
-        crate::totp::TotpError::BadUri => "not a valid otpauth:// URI".into(),
-        crate::totp::TotpError::BadSecret => "secret is not valid base32".into(),
-        crate::totp::TotpError::UnsupportedAlgorithm => "only SHA1 is supported".into(),
+        simple_password_manager::totp::TotpError::NoSecret => "secret missing".into(),
+        simple_password_manager::totp::TotpError::BadUri => "not a valid otpauth:// URI".into(),
+        simple_password_manager::totp::TotpError::BadSecret => "secret is not valid base32".into(),
+        simple_password_manager::totp::TotpError::UnsupportedAlgorithm => "only SHA1 is supported".into(),
     }
 }

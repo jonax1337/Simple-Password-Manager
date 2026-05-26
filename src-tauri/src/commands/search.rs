@@ -1,5 +1,5 @@
-use crate::kdbx::{DashboardStats, EntryData};
-use crate::state::AppState;
+use simple_password_manager::kdbx::{DashboardStats, EntryData};
+use simple_password_manager::state::AppState;
 use tauri::State;
 
 #[tauri::command]

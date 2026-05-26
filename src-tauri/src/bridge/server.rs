@@ -15,12 +15,24 @@ use super::auth::{token_matches, BridgeFile};
 use super::handlers;
 use crate::state::DatabaseHandle;
 
+/// Provider for the only Tauri-specific bridge operation: bringing the
+/// main window to the foreground. Lifted to a trait so the bridge crate
+/// can stay Tauri-free — production wires an impl that owns the
+/// `tauri::AppHandle` while tests simply pass `None`.
+pub trait FocusController: Send + Sync {
+    fn focus_main_window(&self);
+}
+
 /// Shared state passed to every Bridge HTTP handler.
+///
+/// `focus_controller` is `Option` so integration tests can construct a
+/// state without spinning up a Tauri runtime — endpoints that need it
+/// (currently only `focus_app`) gracefully return 503 when it's absent.
 #[derive(Clone)]
 pub struct BridgeState {
     pub token: Arc<String>,
     pub db_handle: DatabaseHandle,
-    pub app_handle: tauri::AppHandle,
+    pub focus_controller: Option<Arc<dyn FocusController>>,
 }
 
 /// Boots the HTTP server on 127.0.0.1 with an OS-chosen port. The server
@@ -29,13 +41,13 @@ pub struct BridgeState {
 /// cleanup in main.rs handles state.
 pub async fn start(
     db_handle: DatabaseHandle,
-    app_handle: tauri::AppHandle,
+    focus_controller: Arc<dyn FocusController>,
 ) -> std::io::Result<BridgeFile> {
     let token = super::auth::generate_token();
     let state = BridgeState {
         token: Arc::new(token.clone()),
         db_handle,
-        app_handle,
+        focus_controller: Some(focus_controller),
     };
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -56,7 +68,9 @@ pub async fn start(
     })
 }
 
-fn router(state: BridgeState) -> Router {
+/// Public so integration tests can stand up a server against a fabricated
+/// BridgeState without depending on the Tauri AppHandle.
+pub fn router(state: BridgeState) -> Router {
     // CORS: allow only chrome-extension:// and moz-extension:// origins. We
     // can't statically pin a single extension ID (we don't know ours until
     // the extension is built/installed), so we use a predicate.

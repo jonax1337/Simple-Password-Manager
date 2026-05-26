@@ -56,3 +56,149 @@ fn collect_descendant_entries(
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn populated_db() -> (TempDir, Database, String, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("search.kdbx");
+        let mut db = Database::create(path, "pw".into()).unwrap();
+        let root = db.get_root_group().uuid;
+
+        db.create_group("Sub".into(), Some(root.clone()), None).unwrap();
+        let sub = db.get_root_group().children[0].uuid.clone();
+
+        let mut a = blank_entry(&root);
+        a.title = "GitHub".into();
+        a.username = "alice".into();
+        a.url = "https://github.com".into();
+        a.notes = "main account".into();
+        a.tags = "dev".into();
+        db.create_entry(a).unwrap();
+
+        let mut b = blank_entry(&sub);
+        b.title = "Bank".into();
+        b.username = "bob".into();
+        b.url = "https://bank.example".into();
+        b.notes = "savings".into();
+        b.tags = "finance".into();
+        db.create_entry(b).unwrap();
+
+        (dir, db, root, sub)
+    }
+
+    fn blank_entry(group_uuid: &str) -> EntryData {
+        EntryData {
+            uuid: String::new(),
+            title: String::new(),
+            username: String::new(),
+            password: "x".into(),
+            url: String::new(),
+            notes: String::new(),
+            tags: String::new(),
+            group_uuid: group_uuid.into(),
+            icon_id: None,
+            is_favorite: false,
+            created: None,
+            modified: None,
+            last_accessed: None,
+            expiry_time: None,
+            expires: false,
+            usage_count: 0,
+            custom_fields: Vec::new(),
+            history: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn search_matches_title() {
+        let (_d, db, _, _) = populated_db();
+        let hits = db.search_entries("GitHub");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "GitHub");
+    }
+
+    #[test]
+    fn search_is_case_insensitive() {
+        let (_d, db, _, _) = populated_db();
+        assert_eq!(db.search_entries("github").len(), 1);
+        assert_eq!(db.search_entries("GITHUB").len(), 1);
+        assert_eq!(db.search_entries("GiThUb").len(), 1);
+    }
+
+    #[test]
+    fn search_matches_username() {
+        let (_d, db, _, _) = populated_db();
+        assert_eq!(db.search_entries("bob").len(), 1);
+    }
+
+    #[test]
+    fn search_matches_url() {
+        let (_d, db, _, _) = populated_db();
+        let hits = db.search_entries("bank.example");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Bank");
+    }
+
+    #[test]
+    fn search_matches_notes() {
+        let (_d, db, _, _) = populated_db();
+        let hits = db.search_entries("savings");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "Bank");
+    }
+
+    #[test]
+    fn search_matches_tags() {
+        let (_d, db, _, _) = populated_db();
+        let hits = db.search_entries("dev");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "GitHub");
+    }
+
+    #[test]
+    fn search_substring_in_url() {
+        let (_d, db, _, _) = populated_db();
+        // .com appears in github.com only
+        let hits = db.search_entries(".com");
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn search_empty_query_matches_all() {
+        // Every field contains the empty string.
+        let (_d, db, _, _) = populated_db();
+        assert_eq!(db.search_entries("").len(), 2);
+    }
+
+    #[test]
+    fn search_no_matches() {
+        let (_d, db, _, _) = populated_db();
+        assert!(db.search_entries("definitelynotpresent").is_empty());
+    }
+
+    #[test]
+    fn search_in_group_scoped_to_subtree() {
+        let (_d, db, root, sub) = populated_db();
+        // root contains "GitHub" + (sub contains "Bank"): empty query returns both
+        assert_eq!(db.search_entries_in_group("", &root).len(), 2);
+        // sub by itself only contains "Bank"
+        assert_eq!(db.search_entries_in_group("", &sub).len(), 1);
+        // "github" inside sub yields nothing
+        assert!(db.search_entries_in_group("github", &sub).is_empty());
+        // "bank" inside root traverses into sub
+        assert_eq!(db.search_entries_in_group("bank", &root).len(), 1);
+    }
+
+    #[test]
+    fn search_in_group_returns_empty_for_bad_uuid() {
+        let (_d, db, _, _) = populated_db();
+        assert!(db.search_entries_in_group("x", "not-a-uuid").is_empty());
+        assert!(db
+            .search_entries_in_group("x", "00000000-0000-0000-0000-000000000000")
+            .is_empty());
+    }
+}

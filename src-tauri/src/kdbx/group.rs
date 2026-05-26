@@ -136,3 +136,156 @@ impl Database {
             .map_err(|_| DatabaseError::GroupNotFound)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn fresh_db() -> (TempDir, Database) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("group_tests.kdbx");
+        let db = Database::create(path, "pw".into()).unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn root_group_has_no_parent() {
+        let (_dir, db) = fresh_db();
+        let root = db.get_root_group();
+        assert!(root.parent_uuid.is_none());
+        assert!(root.children.is_empty());
+    }
+
+    #[test]
+    fn create_group_under_root() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("Work".into(), Some(root.clone()), Some(7)).unwrap();
+
+        let root_after = db.get_root_group();
+        assert_eq!(root_after.children.len(), 1);
+        assert_eq!(root_after.children[0].name, "Work");
+        assert_eq!(root_after.children[0].parent_uuid.as_deref(), Some(root.as_str()));
+        assert_eq!(root_after.children[0].icon_id, Some(7));
+    }
+
+    #[test]
+    fn create_group_with_no_parent_defaults_to_root() {
+        let (_dir, mut db) = fresh_db();
+        db.create_group("Floating".into(), None, None).unwrap();
+        let children = db.get_root_group().children;
+        assert!(children.iter().any(|g| g.name == "Floating"));
+    }
+
+    #[test]
+    fn create_group_under_nonexistent_parent_fails() {
+        let (_dir, mut db) = fresh_db();
+        let err = db
+            .create_group(
+                "Orphan".into(),
+                Some("00000000-0000-0000-0000-000000000000".into()),
+                None,
+            )
+            .unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+
+    #[test]
+    fn rename_group_updates_name_and_icon() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("Before".into(), Some(root.clone()), None).unwrap();
+        let g_uuid = db.get_root_group().children[0].uuid.clone();
+
+        db.rename_group(&g_uuid, "After".into(), Some(42)).unwrap();
+
+        let g = &db.get_root_group().children[0];
+        assert_eq!(g.name, "After");
+        assert_eq!(g.icon_id, Some(42));
+    }
+
+    #[test]
+    fn rename_group_with_bad_uuid_fails() {
+        let (_dir, mut db) = fresh_db();
+        let err = db.rename_group("not-uuid", "x".into(), None).unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+
+    #[test]
+    fn move_group_reparents() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("A".into(), Some(root.clone()), None).unwrap();
+        db.create_group("B".into(), Some(root.clone()), None).unwrap();
+        let children = db.get_root_group().children;
+        let a = children.iter().find(|g| g.name == "A").unwrap().uuid.clone();
+        let b = children.iter().find(|g| g.name == "B").unwrap().uuid.clone();
+
+        db.move_group(&a, &b).unwrap();
+
+        let root_after = db.get_root_group();
+        assert_eq!(root_after.children.len(), 1);
+        let b_after = &root_after.children[0];
+        assert_eq!(b_after.children.len(), 1);
+        assert_eq!(b_after.children[0].uuid, a);
+    }
+
+    #[test]
+    fn move_group_to_itself_is_rejected() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("A".into(), Some(root), None).unwrap();
+        let a = db.get_root_group().children[0].uuid.clone();
+
+        let err = db.move_group(&a, &a).unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+
+    #[test]
+    fn move_root_group_is_rejected() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("A".into(), Some(root.clone()), None).unwrap();
+        let a = db.get_root_group().children[0].uuid.clone();
+
+        let err = db.move_group(&root, &a).unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+
+    #[test]
+    fn delete_group_removes_it() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("Doomed".into(), Some(root), None).unwrap();
+        let g = db.get_root_group().children[0].uuid.clone();
+
+        db.delete_group(&g).unwrap();
+        assert!(db.get_root_group().children.is_empty());
+    }
+
+    #[test]
+    fn delete_root_group_is_rejected() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let err = db.delete_group(&root).unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+
+    #[test]
+    fn reorder_group_is_currently_a_noop_but_validates_uuid() {
+        let (_dir, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_group("A".into(), Some(root), None).unwrap();
+        let a = db.get_root_group().children[0].uuid.clone();
+
+        // Real group → ok (no-op)
+        assert!(db.reorder_group(&a, 0).is_ok());
+
+        // Fake uuid → GroupNotFound
+        let err = db
+            .reorder_group("00000000-0000-0000-0000-000000000000", 0)
+            .unwrap_err();
+        assert!(matches!(err, DatabaseError::GroupNotFound));
+    }
+}

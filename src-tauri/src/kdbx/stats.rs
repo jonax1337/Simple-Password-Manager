@@ -101,3 +101,179 @@ impl Database {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kdbx::types::EntryData;
+    use tempfile::TempDir;
+
+    fn fresh_db() -> (TempDir, Database) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("stats.kdbx");
+        let db = Database::create(path, "pw".into()).unwrap();
+        (dir, db)
+    }
+
+    fn blank(group_uuid: &str, password: &str) -> EntryData {
+        EntryData {
+            uuid: String::new(),
+            title: "T".into(),
+            username: String::new(),
+            password: password.into(),
+            url: String::new(),
+            notes: String::new(),
+            tags: String::new(),
+            group_uuid: group_uuid.into(),
+            icon_id: None,
+            is_favorite: false,
+            created: None,
+            modified: None,
+            last_accessed: None,
+            expiry_time: None,
+            expires: false,
+            usage_count: 0,
+            custom_fields: Vec::new(),
+            history: Vec::new(),
+        }
+    }
+
+    // -------- entropy --------
+
+    #[test]
+    fn entropy_zero_for_empty() {
+        let (_d, db) = fresh_db();
+        assert_eq!(db.calculate_password_entropy(""), 0.0);
+    }
+
+    #[test]
+    fn entropy_grows_with_length() {
+        let (_d, db) = fresh_db();
+        let short = db.calculate_password_entropy("aaaa");
+        let long = db.calculate_password_entropy("aaaaaaaaaaaaaaaa");
+        assert!(long > short);
+    }
+
+    #[test]
+    fn entropy_grows_with_charset_diversity() {
+        let (_d, db) = fresh_db();
+        let lower = db.calculate_password_entropy("abcdefgh");
+        let mixed = db.calculate_password_entropy("Abcd1!fg");
+        assert!(mixed > lower);
+    }
+
+    #[test]
+    fn entropy_lowercase_only_charset_is_26() {
+        let (_d, db) = fresh_db();
+        // 1 char × log2(26) ≈ 4.7
+        let e = db.calculate_password_entropy("a");
+        assert!((e - (26f64).log2()).abs() < 1e-9);
+    }
+
+    // -------- dashboard stats --------
+
+    #[test]
+    fn empty_db_has_zero_stats() {
+        let (_d, db) = fresh_db();
+        let s = db.get_dashboard_stats();
+        assert_eq!(s.total_entries, 0);
+        // Root group itself is one group.
+        assert!(s.total_groups >= 1);
+        assert_eq!(s.weak_passwords, 0);
+        assert_eq!(s.reused_passwords, 0);
+        assert_eq!(s.favorite_entries, 0);
+        assert_eq!(s.average_password_strength, 0.0);
+    }
+
+    #[test]
+    fn weak_password_counted() {
+        let (_d, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(blank(&root, "abc")).unwrap();  // entropy ≈ 14 → weak
+        db.create_entry(blank(&root, "ThisIsAVeryLongAndComplex_P4ssword!"))
+            .unwrap();
+
+        let s = db.get_dashboard_stats();
+        assert_eq!(s.total_entries, 2);
+        assert_eq!(s.weak_passwords, 1);
+    }
+
+    #[test]
+    fn reused_password_counted_once_per_collision_group() {
+        let (_d, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        // Three entries sharing one password and two with unique passwords.
+        db.create_entry(blank(&root, "shared!Pw_123_long")).unwrap();
+        db.create_entry(blank(&root, "shared!Pw_123_long")).unwrap();
+        db.create_entry(blank(&root, "shared!Pw_123_long")).unwrap();
+        db.create_entry(blank(&root, "uniqueOne_abc_123!XYZ")).unwrap();
+        db.create_entry(blank(&root, "uniqueTwo_def_456!XYZ")).unwrap();
+
+        let s = db.get_dashboard_stats();
+        // One *kind* of password is reused.
+        assert_eq!(s.reused_passwords, 1);
+    }
+
+    #[test]
+    fn empty_password_not_counted_as_reused() {
+        let (_d, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(blank(&root, "")).unwrap();
+        db.create_entry(blank(&root, "")).unwrap();
+
+        let s = db.get_dashboard_stats();
+        assert_eq!(s.reused_passwords, 0);
+    }
+
+    #[test]
+    fn favorites_counted() {
+        let (_d, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut fav = blank(&root, "x");
+        fav.is_favorite = true;
+        db.create_entry(fav).unwrap();
+        db.create_entry(blank(&root, "y")).unwrap();
+
+        let s = db.get_dashboard_stats();
+        assert_eq!(s.favorite_entries, 1);
+    }
+
+    #[test]
+    fn expired_entry_counted() {
+        let (_d, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = blank(&root, "x");
+        e.expires = true;
+        e.expiry_time = Some("2020-01-01T00:00".into());
+        db.create_entry(e).unwrap();
+
+        let s = db.get_dashboard_stats();
+        assert_eq!(s.expired_entries, 1);
+    }
+
+    #[test]
+    fn future_expiry_not_counted_as_expired() {
+        let (_d, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        let mut e = blank(&root, "x");
+        e.expires = true;
+        e.expiry_time = Some("2099-12-31T23:59".into());
+        db.create_entry(e).unwrap();
+
+        let s = db.get_dashboard_stats();
+        assert_eq!(s.expired_entries, 0);
+    }
+
+    #[test]
+    fn average_password_strength_is_mean_of_entropies() {
+        let (_d, mut db) = fresh_db();
+        let root = db.get_root_group().uuid;
+        db.create_entry(blank(&root, "aaaa")).unwrap();
+        db.create_entry(blank(&root, "AAAA")).unwrap();
+
+        let s = db.get_dashboard_stats();
+        // Both entries have entropy 4 × log2(26) ≈ 18.8, so the mean is the same value.
+        let expected = 4.0 * (26f64).log2();
+        assert!((s.average_password_strength - expected).abs() < 1e-9);
+    }
+}
