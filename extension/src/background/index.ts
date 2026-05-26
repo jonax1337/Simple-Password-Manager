@@ -18,6 +18,15 @@ import {
 const PENDING_CAPTURE_KEY = "pending_capture";
 const CAPTURE_TTL_MS = 5 * 60_000;
 
+// Persistent "I know I have an entry for this host" cache, so the content
+// script can show its in-field indicator even while the vault is locked
+// (and instantly after extension install, before any popup interaction).
+// Values are bare hostnames; no credentials. Refreshed on every successful
+// status check + on a soft interval while the SW is awake.
+const KNOWN_HOSTS_KEY = "known_hosts";
+const KNOWN_HOSTS_UPDATED_AT_KEY = "known_hosts_updated_at";
+const KNOWN_HOSTS_TTL_MS = 10 * 60_000;
+
 // Wipe any pending capture left over from a previous browser session —
 // chrome.storage.local persists to disk, unlike .session. Keeping a stale
 // captured password across a browser restart would be a security regression.
@@ -152,6 +161,15 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ ok: true, data: info });
         } else if (msg.kind === "fetch") {
           const resp = await doFetch(msg.method, msg.path, msg.body);
+          // Piggy-back: if the popup just polled /v1/status and the vault
+          // is unlocked, kick a known-hosts refresh.
+          if (
+            msg.path === "/v1/status" &&
+            resp.ok &&
+            (resp.data as { unlocked?: boolean })?.unlocked
+          ) {
+            maybeRefreshAfterStatus(true);
+          }
           sendResponse(resp);
         } else if (msg.kind === "capture") {
           await handleCapture(msg);
@@ -206,6 +224,68 @@ async function handleCapture(msg: CaptureMessage): Promise<void> {
   });
   await setBadge("+");
   broadcastCaptureAvailable();
+}
+
+// ---------- known-hosts cache ----------
+//
+// Lightweight: only hostnames (no usernames/passwords/titles), enough for
+// the content script to decide whether to draw its in-field indicator.
+
+let knownHostsRefreshInFlight: Promise<void> | null = null;
+
+async function refreshKnownHostsIfNeeded(force = false): Promise<void> {
+  if (knownHostsRefreshInFlight) return knownHostsRefreshInFlight;
+
+  if (!force) {
+    const stored = await chrome.storage.local.get(KNOWN_HOSTS_UPDATED_AT_KEY);
+    const updatedAt = (stored?.[KNOWN_HOSTS_UPDATED_AT_KEY] as number) ?? 0;
+    if (Date.now() - updatedAt < KNOWN_HOSTS_TTL_MS) return;
+  }
+
+  knownHostsRefreshInFlight = (async () => {
+    try {
+      const resp = await doFetch<unknown[]>("GET", "/v1/entries");
+      // Locked vault returns 423; not an error, just nothing to refresh.
+      if (!resp.ok || !Array.isArray(resp.data)) return;
+      const hosts = new Set<string>();
+      for (const raw of resp.data) {
+        const entry = raw as { url?: string; title?: string };
+        const u = (entry.url ?? "").trim();
+        if (u) {
+          // Try as a URL first.
+          let host: string | null = null;
+          try {
+            host = new URL(u.includes("://") ? u : `https://${u}`).hostname;
+          } catch {
+            host = u.split("/")[0] ?? null;
+          }
+          if (host) hosts.add(host.replace(/^www\./, "").toLowerCase());
+        }
+        // Best-effort secondary: a domain-looking token inside the title
+        // ("github.com Personal" → github.com).
+        const titleMatch = (entry.title ?? "").match(
+          /([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z]{2,})+)/i,
+        );
+        if (titleMatch?.[1]) hosts.add(titleMatch[1].toLowerCase());
+      }
+      await chrome.storage.local.set({
+        [KNOWN_HOSTS_KEY]: Array.from(hosts),
+        [KNOWN_HOSTS_UPDATED_AT_KEY]: Date.now(),
+      });
+    } catch {
+      /* keep the previous cache around */
+    } finally {
+      knownHostsRefreshInFlight = null;
+    }
+  })();
+  return knownHostsRefreshInFlight;
+}
+
+// Refresh after every status check that reports "unlocked" (the popup
+// triggers one every time the user clicks the icon).
+function maybeRefreshAfterStatus(unlocked: boolean): void {
+  if (!unlocked) return;
+  void refreshKnownHostsIfNeeded(false);
 }
 
 async function setBadge(text: string): Promise<void> {
