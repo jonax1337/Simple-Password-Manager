@@ -45,50 +45,52 @@
     border-color: var(--color-gray-200, currentcolor);
   }
 
+  /* Neutral zinc base + indigo only as the brand accent — same palette as
+     the in-page picker / pill so the popup feels like part of the same UI. */
   :root {
-    --background: 250 60% 98%;
-    --foreground: 250 35% 15%;
+    --background: 0 0% 100%;
+    --foreground: 240 10% 4%;
     --card: 0 0% 100%;
-    --card-foreground: 250 35% 15%;
+    --card-foreground: 240 10% 4%;
     --popover: 0 0% 100%;
-    --popover-foreground: 250 35% 15%;
+    --popover-foreground: 240 10% 4%;
     --primary: 250 55% 50%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 250 50% 90%;
-    --secondary-foreground: 250 55% 35%;
-    --muted: 250 40% 95%;
-    --muted-foreground: 250 20% 45%;
-    --accent: 250 60% 92%;
-    --accent-foreground: 250 55% 40%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 250 35% 88%;
-    --input: 250 35% 88%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
     --ring: 250 55% 50%;
     --radius: 0.5rem;
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --background: 250 40% 8%;
-      --foreground: 250 30% 95%;
-      --card: 250 35% 12%;
-      --card-foreground: 250 30% 95%;
-      --popover: 250 35% 12%;
-      --popover-foreground: 250 30% 95%;
-      --primary: 250 50% 65%;
+      --background: 244 35% 12%;
+      --foreground: 0 0% 96%;
+      --card: 244 35% 12%;
+      --card-foreground: 0 0% 96%;
+      --popover: 244 35% 12%;
+      --popover-foreground: 0 0% 96%;
+      --primary: 250 60% 65%;
       --primary-foreground: 250 40% 10%;
-      --secondary: 250 35% 18%;
-      --secondary-foreground: 250 30% 95%;
-      --muted: 250 30% 20%;
-      --muted-foreground: 250 20% 65%;
-      --accent: 250 35% 22%;
-      --accent-foreground: 250 40% 85%;
-      --destructive: 0 62.8% 50%;
+      --secondary: 244 26% 19%;
+      --secondary-foreground: 0 0% 96%;
+      --muted: 244 26% 19%;
+      --muted-foreground: 240 4% 66%;
+      --accent: 244 26% 19%;
+      --accent-foreground: 0 0% 96%;
+      --destructive: 0 62% 50%;
       --destructive-foreground: 0 0% 100%;
-      --border: 250 30% 25%;
-      --input: 250 30% 25%;
-      --ring: 250 50% 60%;
+      --border: 244 26% 22%;
+      --input: 244 26% 22%;
+      --ring: 250 60% 65%;
     }
   }
 
