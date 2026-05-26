@@ -11,6 +11,7 @@
 
 import { detectIntent, type Intent } from "./detect-intent";
 import { showInlineBanner } from "./inline-banner";
+import { baseDomain, isSameSite } from "./domain";
 
 const LOG = "[SPM]";
 
@@ -70,21 +71,22 @@ async function maybeShowFromPending(): Promise<void> {
         intent?: Intent;
       };
   if (!cap) return;
-  if (Date.now() - (cap.capturedAt ?? 0) > 60_000) return;
+  // 5 minutes is long enough for a sluggish MFA challenge or a captcha,
+  // short enough that the stale token from a previous session doesn't pop
+  // up randomly when the user revisits the site days later.
+  if (Date.now() - (cap.capturedAt ?? 0) > 5 * 60_000) return;
 
-  const currentDomain = window.location.hostname.replace(/^www\./, "");
-  // Allow base-domain match in either direction so accounts.example.com
-  // shows the banner for an example.com capture and vice versa.
-  if (
-    currentDomain !== cap.domain &&
-    !currentDomain.endsWith("." + cap.domain) &&
-    !cap.domain.endsWith("." + currentDomain)
-  ) {
+  const currentHost = window.location.hostname;
+  if (!isSameSite(currentHost, cap.domain)) {
+    console.debug(LOG, "pending capture skipped (different site):", {
+      current: baseDomain(currentHost),
+      captured: baseDomain(cap.domain),
+    });
     return;
   }
   if (blocklistCache.has(cap.domain)) return;
 
-  console.debug(LOG, "resurrecting banner from pending capture");
+  console.debug(LOG, "resurrecting banner from pending capture on", currentHost);
   showInlineBanner({
     domain: cap.domain,
     url: cap.url,
@@ -126,6 +128,10 @@ function captureNow(reason: string): void {
   const passwordField = findPasswordField();
   if (!passwordField || !passwordField.value) {
     console.debug(LOG, "capture skipped (no password field):", reason);
+    return;
+  }
+  if (looksLikeOtpField(passwordField, passwordField.value)) {
+    console.debug(LOG, "capture skipped (looks like an OTP/MFA field)");
     return;
   }
   const usernameField = findUsernameField(passwordField);
@@ -323,6 +329,41 @@ function isVisible(el: HTMLElement): boolean {
 function boundingArea(el: HTMLElement): number {
   const r = el.getBoundingClientRect();
   return r.width * r.height;
+}
+
+// Skip capture when the password field is actually a 2FA / OTP / PIN box.
+// Otherwise we'd overwrite the user's just-captured real login with a
+// 6-digit code the moment they submit the MFA challenge page.
+function looksLikeOtpField(el: HTMLInputElement, value: string): boolean {
+  // Pure short-digit values are almost always OTP codes (6 digits standard,
+  // sometimes 4 or 8). A real password being all digits and < 10 chars is
+  // exceedingly rare and not worth saving anyway.
+  const trimmed = value.trim();
+  if (/^\d{4,10}$/.test(trimmed)) return true;
+
+  // Standard browser hint for one-time-code inputs.
+  const auto = (el.autocomplete ?? "").toLowerCase();
+  if (auto.includes("one-time-code")) return true;
+
+  // Field-naming hints. We check name/id/placeholder/aria-label/maxlength.
+  const hay = [
+    el.name ?? "",
+    el.id ?? "",
+    el.placeholder ?? "",
+    el.getAttribute("aria-label") ?? "",
+    el.getAttribute("autocomplete") ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  if (/\b(otp|2fa|mfa|one[-_ ]?time|verif(y|ication)|auth[-_ ]?code|token|pin|tan|sms|backup[-_ ]?code|recovery[-_ ]?code)\b/.test(hay)) {
+    return true;
+  }
+
+  // Short maxlength is another good signal (most OTP fields cap at 6-8).
+  const maxLen = el.maxLength;
+  if (maxLen > 0 && maxLen <= 10 && /^\d+$/.test(trimmed)) return true;
+
+  return false;
 }
 
 function setNativeValue(el: HTMLInputElement, value: string) {
