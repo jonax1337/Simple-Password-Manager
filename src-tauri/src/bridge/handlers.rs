@@ -106,7 +106,7 @@ fn extract_host(url: &str) -> String {
         None => url,
     };
     let host_end = without_scheme
-        .find(|c: char| c == '/' || c == '?' || c == '#')
+        .find(['/', '?', '#'])
         .unwrap_or(without_scheme.len());
     let host = &without_scheme[..host_end];
     // Strip optional userinfo and port

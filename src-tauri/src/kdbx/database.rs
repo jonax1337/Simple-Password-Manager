@@ -165,18 +165,22 @@ impl Database {
             let src_entry = src_entry_ref.clone();
 
             if target_entry_ids.contains(src_entry_id) {
-                if let Some(target_entry_ref) = target.entry(*src_entry_id) {
-                    let src_mod = src_entry_ref.times.last_modification;
-                    let tgt_mod = target_entry_ref.times.last_modification;
-                    if src_mod > tgt_mod {
-                        drop(target_entry_ref);
-                        if let Some(mut tgt_mut) = target.entry_mut(*src_entry_id) {
-                            tgt_mut.fields = src_entry.fields.clone();
-                            tgt_mut.tags = src_entry.tags.clone();
-                            tgt_mut.times = src_entry.times.clone();
-                            tgt_mut.custom_data = src_entry.custom_data.clone();
-                            tgt_mut.history = src_entry.history.clone();
-                        }
+                // Compute the comparison in a scope so the immutable EntryRef
+                // borrow ends before we take the mutable entry_mut below.
+                let src_is_newer = target
+                    .entry(*src_entry_id)
+                    .map(|target_entry_ref| {
+                        src_entry_ref.times.last_modification
+                            > target_entry_ref.times.last_modification
+                    })
+                    .unwrap_or(false);
+                if src_is_newer {
+                    if let Some(mut tgt_mut) = target.entry_mut(*src_entry_id) {
+                        tgt_mut.fields = src_entry.fields.clone();
+                        tgt_mut.tags = src_entry.tags.clone();
+                        tgt_mut.times = src_entry.times.clone();
+                        tgt_mut.custom_data = src_entry.custom_data.clone();
+                        tgt_mut.history = src_entry.history.clone();
                     }
                 }
             } else if let Some(mut tgt_group) = target.group_mut(target_group_id) {

@@ -416,7 +416,7 @@ async fn create_entry_persists_and_is_visible_via_list() {
         .unwrap();
 
     assert_eq!(create["title"], "NewSite");
-    assert!(create["uuid"].as_str().unwrap().len() > 0);
+    assert!(!create["uuid"].as_str().unwrap().is_empty());
 
     // And it shows up in the listing.
     let hits: Vec<serde_json::Value> = client()

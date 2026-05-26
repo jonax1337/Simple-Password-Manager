@@ -167,7 +167,6 @@ fn read_bridge_file() -> Option<BridgeFile> {
 // the extension a stale token.
 #[cfg(target_os = "windows")]
 fn process_alive(pid: u32) -> bool {
-    use std::ptr::null_mut;
     extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
         fn GetExitCodeProcess(handle: *mut std::ffi::c_void, code: *mut u32) -> i32;
@@ -178,7 +177,7 @@ fn process_alive(pid: u32) -> bool {
 
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle == null_mut() {
+        if handle.is_null() {
             return false;
         }
         let mut code: u32 = 0;
