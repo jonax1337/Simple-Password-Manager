@@ -36,12 +36,20 @@ export interface CreateEntryResult {
   group_uuid: string;
 }
 
+export interface TotpResult {
+  code: string;
+  period: number;
+  remaining_seconds: number;
+  algorithm: string;
+}
+
 export interface CaptureMessage {
   kind: "capture";
   domain: string;
   url: string;
   username: string;
   password: string;
+  intent: "login" | "signup";
 }
 
 /** Background-script message envelope. */

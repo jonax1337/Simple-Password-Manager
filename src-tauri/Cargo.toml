@@ -28,6 +28,7 @@ rand = "0.9"
 thiserror = "2.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 sha1 = "0.11"
+hmac = "0.13"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }

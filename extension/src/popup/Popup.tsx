@@ -18,6 +18,7 @@ import {
   fetchEntriesForDomain,
   fetchPassword,
   fetchStatus,
+  fetchTotp,
   generatePassword,
 } from "./bridge-client";
 import { useActiveDomain } from "./useActiveDomain";
@@ -349,6 +350,7 @@ function EntryRow(props: {
                   </Button>
                 }
               />
+              <TotpField entryUuid={props.entry.uuid} />
               <FillButton
                 entry={props.entry}
                 username={details.username}
@@ -360,6 +362,135 @@ function EntryRow(props: {
         </div>
       )}
     </li>
+  );
+}
+
+function TotpField(props: { entryUuid: string }) {
+  // null = not yet fetched. undefined = checked, no TOTP. object = present.
+  const [totp, setTotp] = useState<
+    | null
+    | undefined
+    | { code: string; period: number; expiresAt: number }
+  >(null);
+  const [tick, setTick] = useState(0);
+  const [copied, setCopied] = useState(false);
+
+  // Initial + refresh fetch.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const res = await fetchTotp(props.entryUuid);
+      if (cancelled) return;
+      if (res.ok && res.data) {
+        setTotp({
+          code: res.data.code,
+          period: res.data.period,
+          expiresAt: Date.now() + res.data.remaining_seconds * 1000,
+        });
+      } else if (res.status === 404) {
+        setTotp(undefined);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.entryUuid]);
+
+  // 1Hz tick to update the countdown / refetch when expired.
+  useEffect(() => {
+    if (!totp) return;
+    const t = setInterval(() => setTick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, [totp]);
+
+  // When the current code expires, refetch.
+  useEffect(() => {
+    if (!totp) return;
+    const current = totp;
+    if (Date.now() < current.expiresAt) return;
+    fetchTotp(props.entryUuid).then((res) => {
+      if (res.ok && res.data) {
+        setTotp({
+          code: res.data.code,
+          period: res.data.period,
+          expiresAt: Date.now() + res.data.remaining_seconds * 1000,
+        });
+      }
+    });
+  }, [tick, totp, props.entryUuid]);
+
+  if (totp === null || totp === undefined) return null;
+  const current = totp;
+  const remaining = Math.max(0, Math.ceil((current.expiresAt - Date.now()) / 1000));
+  const ratio = current.period > 0 ? remaining / current.period : 0;
+  const urgent = remaining <= 5;
+
+  async function copy() {
+    await navigator.clipboard.writeText(current.code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  }
+
+  return (
+    <div>
+      <Label className="mb-1 block">One-time code</Label>
+      <div className="flex items-stretch gap-1">
+        <div className="flex flex-1 items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 py-1.5">
+          <span className="font-mono text-base tracking-widest">
+            {current.code.slice(0, 3)} {current.code.slice(3)}
+          </span>
+          <CountdownRing
+            ratio={ratio}
+            urgent={urgent}
+            label={String(remaining)}
+          />
+        </div>
+        <Button variant="outline" size="icon" onClick={copy} title="Copy">
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CountdownRing(props: { ratio: number; urgent: boolean; label: string }) {
+  const radius = 8;
+  const circumference = 2 * Math.PI * radius;
+  const dash = circumference * Math.max(0, Math.min(1, props.ratio));
+  return (
+    <div className="relative h-5 w-5">
+      <svg viewBox="0 0 20 20" className="h-5 w-5 -rotate-90">
+        <circle
+          cx="10"
+          cy="10"
+          r={radius}
+          stroke="currentColor"
+          className="text-border"
+          strokeWidth="2"
+          fill="none"
+        />
+        <circle
+          cx="10"
+          cy="10"
+          r={radius}
+          stroke="currentColor"
+          className={props.urgent ? "text-rose-500" : "text-primary"}
+          strokeWidth="2"
+          strokeDasharray={`${dash} ${circumference - dash}`}
+          strokeLinecap="round"
+          fill="none"
+        />
+      </svg>
+      <span
+        className={cn(
+          "absolute inset-0 flex items-center justify-center text-[9px] font-medium tabular-nums",
+          props.urgent && "text-rose-600",
+        )}
+      >
+        {props.label}
+      </span>
+    </div>
   );
 }
 

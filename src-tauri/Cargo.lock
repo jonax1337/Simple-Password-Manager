@@ -3874,6 +3874,7 @@ version = "1.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "hmac",
  "keepass",
  "rand",
  "reqwest",

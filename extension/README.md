@@ -126,9 +126,46 @@ password field, and on clicks of buttons whose label matches "log in / sign
 in / sign up / submit / anmelden / einloggen / registrieren". Adjust in
 `src/content/index.ts` if a site you use doesn't trigger it.
 
+## TOTP
+
+If an entry has a KeePassXC-style `otp` custom field — either an
+`otpauth://totp/...` URI or a raw Base32 secret — the popup shows the
+current 6-digit code in the entry's expanded view, with a countdown ring
+that auto-refreshes when the code rolls over. Only HMAC-SHA1 is supported
+(matches KeePassXC and every real-world site).
+
+To create one in the desktop app: open the entry, add a custom field named
+`otp` and paste the `otpauth://` URI you got from the site's "set up 2FA"
+flow. The popup picks it up on next load.
+
+## Sign-up vs sign-in awareness
+
+The content script scores each capture as `login` or `signup` based on
+several heuristics — number of password fields (two means "confirm
+password" = signup), nearby button text, URL path, field-name hints like
+`firstname`. The inline banner then says either "Save this login?" or
+"Save this new account?" so the wording matches the user's intent.
+
+If a guess is wrong it doesn't break anything — the save itself is
+identical for both flavours.
+
+## Inline page banner
+
+The save flow is two-pronged. Right after a form submit the content script
+injects a small banner directly into the host page (via Shadow DOM so the
+host's CSS can't deface it). The user can save, dismiss, or pick *Never on
+this site* — which adds the domain to a blocklist (`chrome.storage.local`)
+that the content script consults on subsequent captures.
+
+If the form submission causes a full page navigation and the inline banner
+gets torn down before the user reacts, the BG-stashed capture surfaces on
+the next page load: when a fresh content script boots, it checks
+`chrome.storage.session` and resurrects the banner on the destination page
+(only if origin matches and the capture is < 60 s old). The popup banner
+is the final fallback in case the next page is somehow off-origin.
+
 ## Known gaps (will land in 3.x follow-ups)
 
-- No TOTP integration.
 - No HTTP Basic Auth interception.
 - No per-domain approval — currently any entry whose URL matches the active
   domain is returned to the extension on request.

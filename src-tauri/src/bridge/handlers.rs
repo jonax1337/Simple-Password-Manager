@@ -115,6 +115,53 @@ fn extract_host(url: &str) -> String {
     host.trim_start_matches("www.").to_string()
 }
 
+// ---------- GET /v1/entries/:id/totp ----------
+
+#[derive(Serialize)]
+pub struct TotpResponse {
+    pub code: String,
+    pub period: u64,
+    pub remaining_seconds: u64,
+    pub algorithm: &'static str,
+}
+
+pub async fn entry_totp(
+    State(state): State<BridgeState>,
+    Path(uuid): Path<String>,
+) -> Result<Json<TotpResponse>, StatusCode> {
+    let entry = with_unlocked_db(&state, |db| db.get_entry(&uuid).ok())?;
+    let entry = entry.ok_or(StatusCode::NOT_FOUND)?;
+
+    // Look for an `otp` field (or any custom field that looks like otpauth://).
+    let raw = entry
+        .custom_fields
+        .iter()
+        .find(|f| f.name.eq_ignore_ascii_case("otp"))
+        .map(|f| f.value.clone())
+        .or_else(|| {
+            entry
+                .custom_fields
+                .iter()
+                .find(|f| f.value.starts_with("otpauth://"))
+                .map(|f| f.value.clone())
+        })
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let result = if raw.starts_with("otpauth://") {
+        super::totp::from_otpauth_uri(&raw)
+    } else {
+        super::totp::from_raw_secret(&raw)
+    }
+    .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+
+    Ok(Json(TotpResponse {
+        code: result.code,
+        period: result.period,
+        remaining_seconds: result.remaining_seconds,
+        algorithm: result.algorithm,
+    }))
+}
+
 // ---------- GET /v1/entries/:id/password ----------
 
 #[derive(Serialize)]

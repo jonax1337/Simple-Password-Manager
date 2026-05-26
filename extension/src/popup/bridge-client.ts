@@ -8,6 +8,7 @@ import type {
   EntrySummary,
   PasswordResult,
   StatusResult,
+  TotpResult,
 } from "../common/bridge";
 
 function send<T>(msg: BgMessage): Promise<BgResponse<T>> {
@@ -49,6 +50,14 @@ export async function fetchPassword(
     kind: "fetch",
     method: "GET",
     path: `/v1/entries/${encodeURIComponent(uuid)}/password`,
+  });
+}
+
+export async function fetchTotp(uuid: string): Promise<BgResponse<TotpResult>> {
+  return send<TotpResult>({
+    kind: "fetch",
+    method: "GET",
+    path: `/v1/entries/${encodeURIComponent(uuid)}/totp`,
   });
 }
 
