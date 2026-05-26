@@ -165,7 +165,18 @@ jobs:
           fi
 
           win_signature=$(cat "$win_sig")
-          win_url="https://github.com/$REPO/releases/download/$VERSION/$(basename "$win_exe")"
+          # GitHub stores release assets with spaces normalised to dots
+          # (e.g. "Simple Password Manager_1.2.0_x64-setup.exe" becomes
+          # "Simple.Password.Manager_1.2.0_x64-setup.exe"). Use the actual
+          # asset name from the release rather than the basename of the
+          # local file, otherwise the updater download 404s.
+          win_asset=$(gh release view "$VERSION" --json assets \
+            --jq '.assets[].name' | grep -E '_x64-setup\.exe$' | head -n1)
+          if [ -z "$win_asset" ]; then
+            echo "Could not find x64-setup.exe asset on release $VERSION" >&2
+            exit 1
+          fi
+          win_url="https://github.com/$REPO/releases/download/$VERSION/$win_asset"
 
           cat > latest.json <<EOF
           {
