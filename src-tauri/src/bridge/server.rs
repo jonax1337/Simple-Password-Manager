@@ -84,6 +84,7 @@ fn router(state: BridgeState) -> Router {
         .route("/v1/entries/{id}/password", get(handlers::entry_password))
         .route("/v1/entries/{id}/totp", get(handlers::entry_totp))
         .route("/v1/password/generate", post(handlers::generate_password))
+        .route("/v1/entries/check", post(handlers::check_entry))
         .route("/v1/focus-app", post(handlers::focus_app))
         .layer(middleware::from_fn_with_state(
             state.clone(),

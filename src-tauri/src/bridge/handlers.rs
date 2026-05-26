@@ -337,6 +337,76 @@ pub async fn generate_password(
     Ok(Json(GeneratePasswordResponse { password }))
 }
 
+// ---------- POST /v1/entries/check ----------
+//
+// Used by the content script before showing the inline "Save this login?"
+// banner — so we don't pester the user about saving credentials they
+// already have stored. The check is cheap (one in-memory scan) and avoids
+// the alternative of shipping every entry's password back to the extension.
+
+#[derive(Deserialize)]
+pub struct CheckEntryRequest {
+    pub domain: String,
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct CheckEntryResponse {
+    /// True if a saved entry has the same domain + username + password —
+    /// nothing new to save, suppress the banner.
+    pub duplicate: bool,
+    /// True if a saved entry has the same domain + username but a different
+    /// password — an "update" candidate, banner can offer that flow.
+    pub update_available: bool,
+    /// The UUID of an entry that matches by domain+username, if any.
+    pub matching_uuid: Option<String>,
+    /// Same as matching_uuid but only when the title would help the user
+    /// recognise which entry would be updated.
+    pub matching_title: Option<String>,
+}
+
+pub async fn check_entry(
+    State(state): State<BridgeState>,
+    Json(req): Json<CheckEntryRequest>,
+) -> Result<Json<CheckEntryResponse>, StatusCode> {
+    let response = with_unlocked_db(&state, |db| {
+        let mut duplicate = false;
+        let mut update_available = false;
+        let mut matching_uuid: Option<String> = None;
+        let mut matching_title: Option<String> = None;
+
+        for entry in db.get_all_entries() {
+            if !matches_domain(&entry.url, &req.domain) {
+                continue;
+            }
+            if entry.username != req.username {
+                continue;
+            }
+            // Found same domain + username.
+            if matching_uuid.is_none() {
+                matching_uuid = Some(entry.uuid.clone());
+                matching_title = Some(entry.title.clone());
+            }
+            if entry.password == req.password {
+                duplicate = true;
+                break;
+            } else {
+                update_available = true;
+            }
+        }
+
+        CheckEntryResponse {
+            duplicate,
+            update_available,
+            matching_uuid,
+            matching_title,
+        }
+    })?;
+
+    Ok(Json(response))
+}
+
 // ---------- POST /v1/focus-app ----------
 //
 // Brings the desktop window to the foreground so the user can land on the
