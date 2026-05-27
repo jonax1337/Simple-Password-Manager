@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { loadGroupTreeState, saveGroupTreeState } from "@/lib/group-state";
+import { loadGroupTreeState, saveGroupTreeState } from "$lib/group-state";
+import type { GroupData } from "$lib/tauri";
+
+// Helper to satisfy GroupData shape in tests
+function g(uuid: string, children: GroupData[] = []): GroupData {
+  return { uuid, name: uuid, parent_uuid: null, children };
+}
 
 const ROOT_UUID = "00000000-0000-0000-0000-000000000001";
 const GROUP_A = "11111111-1111-1111-1111-111111111111";
@@ -26,10 +32,7 @@ describe("group-state persistence", () => {
     const expanded = new Set<string>([ROOT_UUID, GROUP_A, GROUP_B]);
     saveGroupTreeState("/tmp/db.kdbx", expanded, GROUP_A);
 
-    const loaded = loadGroupTreeState("/tmp/db.kdbx", ROOT_UUID, {
-      uuid: ROOT_UUID,
-      children: [{ uuid: GROUP_A, children: [] }, { uuid: GROUP_B, children: [] }],
-    });
+    const loaded = loadGroupTreeState("/tmp/db.kdbx", ROOT_UUID, g(ROOT_UUID, [g(GROUP_A), g(GROUP_B)]));
     expect(loaded.selectedGroup).toBe(GROUP_A);
     expect(new Set(loaded.expandedGroups)).toEqual(expanded);
   });
@@ -45,25 +48,14 @@ describe("group-state persistence", () => {
     saveGroupTreeState("/tmp/db.kdbx", new Set<string>([ROOT_UUID]), GROUP_A);
 
     // GROUP_A is missing from the rendered tree.
-    const loaded = loadGroupTreeState("/tmp/db.kdbx", ROOT_UUID, {
-      uuid: ROOT_UUID,
-      children: [],
-    });
+    const loaded = loadGroupTreeState("/tmp/db.kdbx", ROOT_UUID, g(ROOT_UUID));
     expect(loaded.selectedGroup).toBe(ROOT_UUID);
   });
 
   it("keeps the selection when the saved group is reachable through the tree", () => {
     saveGroupTreeState("/tmp/db.kdbx", new Set<string>([ROOT_UUID]), GROUP_A);
 
-    const loaded = loadGroupTreeState("/tmp/db.kdbx", ROOT_UUID, {
-      uuid: ROOT_UUID,
-      children: [
-        {
-          uuid: "nested",
-          children: [{ uuid: GROUP_A, children: [] }],
-        },
-      ],
-    });
+    const loaded = loadGroupTreeState("/tmp/db.kdbx", ROOT_UUID, g(ROOT_UUID, [g("nested", [g(GROUP_A)])]));
     expect(loaded.selectedGroup).toBe(GROUP_A);
   });
 
@@ -78,14 +70,8 @@ describe("group-state persistence", () => {
     saveGroupTreeState("/tmp/a.kdbx", new Set<string>([ROOT_UUID]), GROUP_A);
     saveGroupTreeState("/tmp/b.kdbx", new Set<string>([ROOT_UUID]), GROUP_B);
 
-    const a = loadGroupTreeState("/tmp/a.kdbx", ROOT_UUID, {
-      uuid: ROOT_UUID,
-      children: [{ uuid: GROUP_A, children: [] }],
-    });
-    const b = loadGroupTreeState("/tmp/b.kdbx", ROOT_UUID, {
-      uuid: ROOT_UUID,
-      children: [{ uuid: GROUP_B, children: [] }],
-    });
+    const a = loadGroupTreeState("/tmp/a.kdbx", ROOT_UUID, g(ROOT_UUID, [g(GROUP_A)]));
+    const b = loadGroupTreeState("/tmp/b.kdbx", ROOT_UUID, g(ROOT_UUID, [g(GROUP_B)]));
     expect(a.selectedGroup).toBe(GROUP_A);
     expect(b.selectedGroup).toBe(GROUP_B);
   });
