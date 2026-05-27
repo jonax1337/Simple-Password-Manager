@@ -1,12 +1,15 @@
 <script lang="ts">
+  import { Dialog as DialogPrimitive } from "bits-ui";
   import { Button } from "$lib/ui";
-  import { Heart, Download, Check, ArrowLeft } from "@lucide/svelte";
+  import { Heart, Download, Check, X, ExternalLink } from "@lucide/svelte";
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
   import { relaunch } from "@tauri-apps/plugin-process";
   import { open as openShell } from "@tauri-apps/plugin-shell";
-  import { pop } from "svelte-spa-router";
+
+  type Props = { open?: boolean };
+  let { open = $bindable(false) }: Props = $props();
 
   type Status =
     | { kind: "idle" }
@@ -50,38 +53,41 @@
   }
 </script>
 
-<div class="flex h-full flex-col">
-  <div class="shrink-0 flex items-center gap-2 border-b px-4 py-3">
-    <Button variant="ghost" size="icon" onclick={() => pop()}>
-      <ArrowLeft class="h-4 w-4" />
-    </Button>
-    <h1 class="text-lg font-semibold">About</h1>
-  </div>
+<DialogPrimitive.Root bind:open>
+  <DialogPrimitive.Portal>
+    <DialogPrimitive.Overlay
+      class="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+    />
+    <DialogPrimitive.Content
+      class="fixed top-[50%] left-[50%] z-50 w-full max-w-[440px] translate-x-[-50%] translate-y-[-50%] rounded-xl border bg-background p-7 shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+    >
+      <DialogPrimitive.Title class="sr-only">About</DialogPrimitive.Title>
+      <DialogPrimitive.Description class="sr-only">App information</DialogPrimitive.Description>
 
-  <div class="flex-1 overflow-auto">
-    <div class="flex flex-col items-center justify-center p-12 space-y-8">
-      <div class="flex flex-col items-center space-y-4">
-        <img src="/app-icon.png" alt="App Icon" class="h-24 w-24 drop-shadow-md" />
-        <div class="text-center space-y-2">
-          <h1 class="text-3xl font-bold tracking-tight">Simple Password Manager</h1>
-          <p class="text-sm text-muted-foreground">Version {version}</p>
+      <DialogPrimitive.Close
+        class="absolute right-3 top-3 size-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+      >
+        <X class="size-4" />
+        <span class="sr-only">Close</span>
+      </DialogPrimitive.Close>
+
+      <div class="flex flex-col items-center text-center space-y-3">
+        <img src="/app-icon.png" alt="App icon" class="size-16 drop-shadow-md" />
+        <div>
+          <h2 class="text-lg font-semibold tracking-tight">Simple Password Manager</h2>
+          <p class="text-xs text-muted-foreground mt-0.5">Version {version}</p>
         </div>
       </div>
 
-      <p class="text-center text-muted-foreground max-w-md leading-relaxed">
-        A secure and modern password manager built with the proven KeePass database format. Keep your
-        passwords safe with strong encryption.
-      </p>
-
-      <div class="w-full max-w-xs rounded-md border p-3">
+      <div class="mt-5 rounded-lg border p-3">
         <div class="flex items-center gap-2.5">
           {#if status.kind === "uptodate"}
-            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-success/15">
-              <Check class="h-3.5 w-3.5 text-success" />
+            <div class="size-7 shrink-0 grid place-items-center rounded-full bg-success/15">
+              <Check class="size-3.5 text-success" />
             </div>
           {:else}
-            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10">
-              <Download class="h-3.5 w-3.5 text-primary" />
+            <div class="size-7 shrink-0 grid place-items-center rounded-full bg-primary/10">
+              <Download class="size-3.5 text-primary" />
             </div>
           {/if}
           <div class="min-w-0 flex-1 text-sm">
@@ -100,37 +106,36 @@
             {/if}
           </div>
         </div>
-        <div class="mt-3 flex gap-2">
+        <div class="mt-3">
           {#if status.kind === "available"}
-            <Button size="sm" class="flex-1" onclick={install} disabled={busy}>
+            <Button size="sm" class="w-full" onclick={install} disabled={busy}>
               Install &amp; restart
             </Button>
           {:else}
-            <Button size="sm" variant="outline" class="flex-1" onclick={check} disabled={busy}>
+            <Button size="sm" variant="outline" class="w-full" onclick={check} disabled={busy}>
               {status.kind === "checking" ? "Checking…" : "Check for updates"}
             </Button>
           {/if}
         </div>
       </div>
 
-      <div class="flex flex-col gap-3 w-full max-w-xs">
-        <Button variant="outline" class="w-full justify-center gap-2" onclick={() => openShell("https://github.com/jonax1337/Simple-Password-Manager")}>
+      <div class="mt-4">
+        <Button
+          variant="outline"
+          class="w-full justify-center"
+          onclick={() => openShell("https://github.com/jonax1337/Simple-Password-Manager")}
+        >
+          <ExternalLink class="size-3.5" />
           View on GitHub
         </Button>
       </div>
 
-      <div class="flex flex-wrap justify-center gap-2 mt-4">
-        {#each ["Tauri", "Svelte 5", "Vite", "Rust", "TypeScript"] as t (t)}
-          <span class="text-xs px-3 py-1 rounded-full bg-secondary text-secondary-foreground">{t}</span>
-        {/each}
-      </div>
-
-      <div class="pt-8 text-center space-y-1">
-        <p class="text-xs text-muted-foreground flex items-center justify-center gap-1">
+      <div class="mt-5 pt-4 border-t text-center text-[11px] text-muted-foreground space-y-1">
+        <p class="flex items-center justify-center gap-1">
           Made with <Heart class="h-3 w-3 fill-current text-destructive" /> by Jonas Laux
         </p>
-        <p class="text-xs text-muted-foreground">Open Source • MIT License</p>
+        <p>Open Source · MIT License</p>
       </div>
-    </div>
-  </div>
-</div>
+    </DialogPrimitive.Content>
+  </DialogPrimitive.Portal>
+</DialogPrimitive.Root>

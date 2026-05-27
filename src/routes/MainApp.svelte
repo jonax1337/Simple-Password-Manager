@@ -25,6 +25,8 @@
   import UnsavedChangesDialog from "$lib/components/UnsavedChangesDialog.svelte";
   import DatabaseConflictDialog from "$lib/components/DatabaseConflictDialog.svelte";
   import CommandPalette, { type PaletteCommand } from "$lib/components/CommandPalette.svelte";
+  import SettingsDialog from "$lib/components/SettingsDialog.svelte";
+  import AboutDialog from "$lib/components/AboutDialog.svelte";
   import { toast } from "$lib/ui";
   import {
     Save,
@@ -43,7 +45,6 @@
   } from "@lucide/svelte";
   import { loadGroupTreeState } from "$lib/group-state";
   import { getGroupPath } from "$lib/group-utils";
-  import { push } from "svelte-spa-router";
   import { theme } from "$lib/theme.svelte";
 
   type Props = { onClose: (isManualLogout?: boolean) => void };
@@ -61,6 +62,8 @@
   let showConflict = $state(false);
   let liveUpdatesEnabled = $state(false);
   let paletteOpen = $state(false);
+  let settingsOpen = $state(false);
+  let aboutOpen = $state(false);
 
   let initialExpanded: Set<string> | undefined = $state(undefined);
 
@@ -275,6 +278,9 @@
       if (isEditable(e.target)) return;
       e.preventDefault();
       void handleRedo();
+    } else if (mod && e.key === ",") {
+      e.preventDefault();
+      settingsOpen = true;
     }
   }
 
@@ -315,14 +321,14 @@
       label: "Open Settings",
       section: "Actions",
       icon: SettingsIcon,
-      onSelect: () => push("/settings"),
+      onSelect: () => (settingsOpen = true),
     },
     {
       id: "act-about",
       label: "Open About",
       section: "Actions",
       icon: Info,
-      onSelect: () => push("/about"),
+      onSelect: () => (aboutOpen = true),
     },
     { id: "act-lock", label: "Lock database", section: "Actions", icon: LogOut, onSelect: handleLogout },
     { id: "theme-system", label: "Theme: System", section: "Theme", icon: Monitor, onSelect: () => theme.set("system") },
@@ -371,6 +377,7 @@
       return [];
     }
   }
+
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -387,11 +394,9 @@
           if (selectedUuid === deleted && rootGroup) selectGroup(rootGroup.uuid);
         }}
         initialExpandedGroups={initialExpanded}
-        onOpenPalette={() => (paletteOpen = true)}
+        onOpenSettings={() => (settingsOpen = true)}
         onSave={handleSave}
         onLogout={handleLogout}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
       />
     {/snippet}
 
@@ -439,6 +444,9 @@
   onSearch={paletteSearch}
   placeholder="Search entries, jump to folders, run commands…"
 />
+
+<SettingsDialog bind:open={settingsOpen} onOpenAbout={() => { settingsOpen = false; aboutOpen = true; }} />
+<AboutDialog bind:open={aboutOpen} />
 
 <UnsavedChangesDialog
   bind:open={showUnsaved}
