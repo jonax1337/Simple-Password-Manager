@@ -28,11 +28,14 @@
 
 <header
   data-tauri-drag-region
-  class="titlebar select-none flex items-center h-9 shrink-0 bg-card border-b text-foreground"
+  class="titlebar select-none flex items-center h-9 shrink-0 bg-sidebar border-b border-border/60 text-foreground"
 >
   {#if showAppMark}
-    <div data-tauri-drag-region class="flex items-center gap-2 pl-3 pr-4">
-      <div class="grid place-items-center size-5 rounded-[4px] bg-primary text-primary-foreground font-bold text-[10px]">
+    <div data-tauri-drag-region class="flex items-center gap-2 pl-3 pr-3">
+      <div
+        class="grid place-items-center size-[18px] rounded-[5px] bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-bold text-[10px] shadow-sm"
+        aria-hidden="true"
+      >
         P
       </div>
     </div>
@@ -42,7 +45,7 @@
 
   <div
     data-tauri-drag-region
-    class="flex-1 flex items-center gap-3 text-xs font-medium text-muted-foreground tracking-tight min-w-0"
+    class="flex-1 flex items-center gap-3 text-[11.5px] font-medium text-muted-foreground tracking-tight min-w-0"
   >
     <span class="truncate">{title}</span>
     {@render children?.()}
@@ -87,18 +90,19 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 46px;
+    width: 44px;
     height: 100%;
-    color: var(--color-foreground);
+    color: var(--color-muted-foreground);
     background: transparent;
-    transition: background-color 120ms ease;
+    transition: background-color 120ms ease, color 120ms ease;
     cursor: pointer;
   }
   :global(.titlebar-btn:hover) {
-    background-color: var(--color-muted);
+    background-color: color-mix(in oklch, var(--color-foreground) 8%, transparent);
+    color: var(--color-foreground);
   }
   :global(.titlebar-btn-close:hover) {
-    background-color: oklch(0.577 0.245 27.325);
+    background-color: oklch(0.58 0.235 27);
     color: white;
   }
 </style>

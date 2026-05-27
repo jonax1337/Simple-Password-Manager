@@ -36,7 +36,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import type { HTMLButtonAttributes, HTMLAnchorAttributes } from "svelte/elements";
-  import { link } from "svelte-spa-router";
   import { cn } from "$lib/utils";
 
   type Props = {
@@ -60,7 +59,6 @@
 {#if href}
   <a
     {href}
-    use:link
     class={cn(buttonVariants({ variant, size }), klass)}
     {...rest as HTMLAnchorAttributes}
   >

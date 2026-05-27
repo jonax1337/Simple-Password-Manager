@@ -1,8 +1,19 @@
 <script lang="ts">
+  // Layout sketch (1Password 8):
+  //   ┌──── sidebar (≈260) ────┬──── item list (≈340) ────┬──── detail (fills) ────┐
+  //   │ vault picker           │ sticky header + search   │ hero (72px icon tile)  │
+  //   │ Home / All / Favorites │ rounded-square tile rows │ LOGIN DETAILS card     │
+  //   │ FOLDERS · tree         │ soft-tinted selection    │ Notes / TOTP / Tags    │
+  //   │ Save · avatar menu     │                          │ Edit button → form     │
+  //   └────────────────────────┴──────────────────────────┴────────────────────────┘
+  // Sidebar virtual ids: _dashboard (Home), _all (All Items), _favorites (Favorites).
+  // The middle column is hidden when on the Home/Watchtower dashboard view.
+
   import { onMount } from "svelte";
   import {
     getGroups,
     getEntry,
+    getEntries,
     getFavoriteEntries,
     saveDatabase,
     closeDatabase,
@@ -37,8 +48,8 @@
     Moon,
     Monitor,
     Star,
-    LayoutPanelLeft,
-    Key,
+    Home,
+    KeyRound,
     Folder,
     Undo2,
     Redo2,
@@ -53,9 +64,8 @@
   let rootGroup = $state<GroupData | null>(null);
   let selectedUuid = $state<string>("_dashboard");
   let selectedEntryUuid = $state<string>("");
+  let allEntries = $state<EntryData[]>([]);
   let favoriteEntries = $state<EntryData[]>([]);
-  let isFavoritesView = $state(false);
-  let isDashboardView = $state(true);
 
   let showUnsaved = $state(false);
   let closeAction = $state<"logout" | "window" | null>(null);
@@ -66,6 +76,10 @@
   let aboutOpen = $state(false);
 
   let initialExpanded: Set<string> | undefined = $state(undefined);
+
+  const isDashboardView = $derived(selectedUuid === "_dashboard");
+  const isFavoritesView = $derived(selectedUuid === "_favorites");
+  const isAllView = $derived(selectedUuid === "_all");
 
   onMount(() => {
     void load();
@@ -93,7 +107,17 @@
       liveUpdatesEnabled = getLiveUpdates(appState.dbPath);
     }
     selectedUuid = "_dashboard";
-    isDashboardView = true;
+  }
+
+  async function collectEntries(g: GroupData): Promise<EntryData[]> {
+    const acc: EntryData[] = [];
+    const walk = async (node: GroupData) => {
+      const here = await getEntries(node.uuid);
+      acc.push(...here);
+      for (const c of node.children) await walk(c);
+    };
+    await walk(g);
+    return acc;
   }
 
   $effect(() => {
@@ -102,6 +126,9 @@
       getGroups().then((g) => (rootGroup = g)).catch(() => undefined);
       if (isFavoritesView) {
         getFavoriteEntries().then((e) => (favoriteEntries = e)).catch(() => undefined);
+      }
+      if (isAllView && rootGroup) {
+        collectEntries(rootGroup).then((e) => (allEntries = e)).catch(() => undefined);
       }
     }
   });
@@ -128,32 +155,25 @@
   async function selectGroup(uuid: string) {
     selectedUuid = uuid;
     selectedEntryUuid = "";
-    if (uuid === "_dashboard") {
-      isDashboardView = true;
-      isFavoritesView = false;
-      favoriteEntries = [];
-      return;
-    }
-    isDashboardView = false;
     if (uuid === "_favorites") {
-      isFavoritesView = true;
       try {
         favoriteEntries = await getFavoriteEntries();
       } catch (e) {
         toast.error("Error", String(e));
       }
-    } else {
-      isFavoritesView = false;
-      favoriteEntries = [];
+    } else if (uuid === "_all" && rootGroup) {
+      try {
+        allEntries = await collectEntries(rootGroup);
+      } catch (e) {
+        toast.error("Error", String(e));
+      }
     }
   }
 
-  // Navigate to an entry, switching to its folder first if needed
   async function jumpToEntry(uuid: string) {
     try {
       const e = await getEntry(uuid);
       await selectGroup(e.group_uuid);
-      // give the list a tick to load
       await new Promise((r) => setTimeout(r, 30));
       selectedEntryUuid = uuid;
     } catch (err) {
@@ -167,8 +187,6 @@
       await win.setTitle("Simple Password Manager");
       selectedUuid = "";
       selectedEntryUuid = "";
-      isDashboardView = true;
-      isFavoritesView = false;
       rootGroup = null;
       undoStack.clear();
       await closeDatabase();
@@ -287,9 +305,11 @@
   const groupName = $derived(
     isFavoritesView
       ? "Favorites"
-      : rootGroup && selectedUuid && !selectedUuid.startsWith("_")
-        ? getGroupPath(rootGroup, selectedUuid)
-        : undefined,
+      : isAllView
+        ? "All Items"
+        : rootGroup && selectedUuid && !selectedUuid.startsWith("_")
+          ? getGroupPath(rootGroup, selectedUuid)
+          : undefined,
   );
 
   function onRefresh() {
@@ -298,38 +318,14 @@
   }
 
   const actionCommands: PaletteCommand[] = $derived([
-    {
-      id: "go-dashboard",
-      label: "Go to Dashboard",
-      section: "Navigate",
-      icon: LayoutPanelLeft,
-      keywords: "home stats",
-      onSelect: () => selectGroup("_dashboard"),
-    },
-    {
-      id: "go-favorites",
-      label: "Go to Favorites",
-      section: "Navigate",
-      icon: Star,
-      onSelect: () => selectGroup("_favorites"),
-    },
+    { id: "go-home", label: "Go to Home", section: "Navigate", icon: Home, keywords: "home dashboard", onSelect: () => selectGroup("_dashboard") },
+    { id: "go-all", label: "Go to All Items", section: "Navigate", icon: KeyRound, onSelect: () => selectGroup("_all") },
+    { id: "go-favorites", label: "Go to Favorites", section: "Navigate", icon: Star, onSelect: () => selectGroup("_favorites") },
     { id: "act-save", label: "Save database", section: "Actions", icon: Save, hint: "Ctrl S", onSelect: handleSave },
     { id: "act-undo", label: "Undo last action", section: "Actions", icon: Undo2, hint: "Ctrl Z", onSelect: handleUndo },
     { id: "act-redo", label: "Redo last action", section: "Actions", icon: Redo2, hint: "Ctrl Y", onSelect: handleRedo },
-    {
-      id: "act-settings",
-      label: "Open Settings",
-      section: "Actions",
-      icon: SettingsIcon,
-      onSelect: () => (settingsOpen = true),
-    },
-    {
-      id: "act-about",
-      label: "Open About",
-      section: "Actions",
-      icon: Info,
-      onSelect: () => (aboutOpen = true),
-    },
+    { id: "act-settings", label: "Open Settings", section: "Actions", icon: SettingsIcon, onSelect: () => (settingsOpen = true) },
+    { id: "act-about", label: "Open About", section: "Actions", icon: Info, onSelect: () => (aboutOpen = true) },
     { id: "act-lock", label: "Lock database", section: "Actions", icon: LogOut, onSelect: handleLogout },
     { id: "theme-system", label: "Theme: System", section: "Theme", icon: Monitor, onSelect: () => theme.set("system") },
     { id: "theme-light", label: "Theme: Light", section: "Theme", icon: Sun, onSelect: () => theme.set("light") },
@@ -369,7 +365,7 @@
         id: `entry-${e.uuid}`,
         label: e.title || "(untitled)",
         section: "Entries",
-        icon: Key,
+        icon: KeyRound,
         hint: e.username || e.url || "",
         onSelect: () => jumpToEntry(e.uuid),
       }));
@@ -378,12 +374,16 @@
     }
   }
 
+  const middleSearchResults = $derived(
+    isFavoritesView ? favoriteEntries : isAllView ? allEntries : [],
+  );
+  const isVirtualList = $derived(isFavoritesView || isAllView);
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 <div class="flex h-full w-full">
-  <SplitPane defaultWidth={240} minWidth={200} maxWidth={420} storageKey="sidebarWidth">
+  <SplitPane defaultWidth={260} minWidth={220} maxWidth={420} storageKey="sidebarWidth">
     {#snippet left()}
       <Sidebar
         {rootGroup}
@@ -405,13 +405,13 @@
       {#if isDashboardView}
         <Dashboard refreshTrigger={appState.refreshCounter} onJumpToEntry={jumpToEntry} />
       {:else}
-        <SplitPane defaultWidth={340} minWidth={260} maxWidth={520} storageKey="entryListWidth">
+        <SplitPane defaultWidth={340} minWidth={280} maxWidth={520} storageKey="entryListWidth">
           {#snippet left()}
             <EntryList
-              groupUuid={isFavoritesView ? "" : selectedUuid}
-              searchResults={isFavoritesView ? favoriteEntries : []}
+              groupUuid={isVirtualList ? "" : selectedUuid}
+              searchResults={middleSearchResults}
               onRefresh={onRefresh}
-              isSearching={isFavoritesView}
+              isSearching={isVirtualList}
               {isFavoritesView}
               rootGroupUuid={rootGroup?.uuid}
               selectedGroupName={groupName}
@@ -443,7 +443,7 @@
   bind:open={paletteOpen}
   commands={commandsAll}
   onSearch={paletteSearch}
-  placeholder="Search entries, jump to folders, run commands…"
+  placeholder="Search items, jump to folders, run commands…"
 />
 
 <SettingsDialog bind:open={settingsOpen} />

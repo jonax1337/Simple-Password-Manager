@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Button, Input, Label, toast } from "$lib/ui";
-  import { KeyRound, Fingerprint } from "@lucide/svelte";
+  import { KeyRound, Fingerprint, Lock } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { openDatabase, helloAvailable, helloIsEnrolled, helloRetrieve } from "$lib/tauri";
   import { addRecentDatabase, getYubikeyHint } from "$lib/storage";
@@ -23,6 +23,8 @@
   let autoTriggered = false;
 
   const yubikeyHint = $derived(getYubikeyHint(lastDatabasePath));
+  const dbFile = $derived(lastDatabasePath.split(/[\\/]/).pop() ?? "Vault");
+  const dbName = $derived(dbFile.replace(/\.kdbx$/i, ""));
 
   onMount(() => {
     void (async () => {
@@ -128,65 +130,93 @@
   databasePath={lastDatabasePath}
 />
 
-<div class="flex flex-1 items-center justify-center bg-gradient-to-br from-background to-muted/40">
-  <div class="w-full max-w-sm space-y-6 rounded-xl border bg-card p-6 shadow-lg">
-    <div class="flex flex-col items-center space-y-2">
-      <img src="/quick-unlock.png" alt="Quick Unlock" width="64" height="64" class="mb-2" />
-      <h2 class="text-xl font-semibold tracking-tight">Quick Unlock</h2>
-      <p class="text-center text-xs text-muted-foreground break-all px-2">{lastDatabasePath}</p>
-    </div>
+<div class="relative flex h-full w-full items-center justify-center overflow-hidden bg-background">
+  <div
+    class="pointer-events-none absolute inset-0 -z-10"
+    aria-hidden="true"
+    style="
+      background:
+        radial-gradient(700px 500px at 50% 0%, color-mix(in oklch, var(--color-primary) 14%, transparent), transparent 70%),
+        radial-gradient(600px 400px at 50% 100%, color-mix(in oklch, var(--color-primary) 6%, transparent), transparent 70%);
+    "
+  ></div>
 
-    <div class="space-y-4">
-      <div class="space-y-2">
-        <Label for="quick-password">Master Password</Label>
-        <!-- svelte-ignore a11y_autofocus -->
-        <Input
-          id="quick-password"
-          type="password"
-          bind:value={password}
-          onkeydown={(e) => e.key === "Enter" && handleUnlock()}
-          placeholder="Enter your master password"
-          autofocus
-        />
+  <div class="w-full max-w-[380px] mx-6">
+    <div class="rounded-2xl border bg-card/95 backdrop-blur px-7 pt-7 pb-6 shadow-xl shadow-foreground/5">
+      <div class="flex flex-col items-center text-center space-y-3">
+        <div class="grid place-items-center size-14 rounded-2xl bg-primary/10 text-primary ring-soft">
+          <Lock class="size-7" />
+        </div>
+        <div>
+          <h2 class="text-[18px] font-semibold tracking-tight">{dbName}</h2>
+          <p class="text-[11px] text-muted-foreground truncate max-w-[300px]" title={lastDatabasePath}>
+            {lastDatabasePath}
+          </p>
+        </div>
       </div>
 
-      {#if yubikeyHint}
-        <div class="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-xs">
-          <KeyRound class="mt-0.5 h-4 w-4 text-primary shrink-0" />
-          <div>
-            <p class="font-medium text-sm">Yubikey required</p>
-            <p class="text-muted-foreground">
-              Plug in serial #{yubikeyHint.serial_number} and touch it when prompted.
-            </p>
-          </div>
+      <div class="mt-6 space-y-4">
+        <div class="space-y-1.5">
+          <Label for="quick-password">Master password</Label>
+          <!-- svelte-ignore a11y_autofocus -->
+          <Input
+            id="quick-password"
+            type="password"
+            bind:value={password}
+            onkeydown={(e) => e.key === "Enter" && handleUnlock()}
+            placeholder="Enter your master password"
+            class="h-10"
+            autofocus
+          />
         </div>
-      {/if}
 
-      {#if helloShown}
-        <Button onclick={handleHelloUnlock} disabled={loading} class="w-full">
-          <Fingerprint class="h-4 w-4" />
-          Unlock with Windows Hello
-        </Button>
-      {/if}
-
-      <Button
-        onclick={handleUnlock}
-        variant={helloShown ? "outline" : "default"}
-        disabled={loading || !password}
-        class="w-full"
-      >
-        {#if loading}
-          {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
-        {:else if helloShown}
-          Use master password
-        {:else}
-          Unlock
+        {#if yubikeyHint}
+          <div class="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <KeyRound class="mt-0.5 size-4 text-primary shrink-0" />
+            <div class="text-[12px] leading-relaxed">
+              <p class="font-medium">Yubikey required</p>
+              <p class="text-muted-foreground">
+                Plug in serial #{yubikeyHint.serial_number} and touch when prompted.
+              </p>
+            </div>
+          </div>
         {/if}
-      </Button>
 
-      <Button variant="outline" onclick={onCancel} class="w-full" disabled={loading}>
-        Open Different Database
-      </Button>
+        <div class="space-y-2">
+          {#if helloShown}
+            <Button onclick={handleHelloUnlock} disabled={loading} class="w-full h-10">
+              <Fingerprint class="size-4" />
+              Unlock with Windows Hello
+            </Button>
+            <Button onclick={handleUnlock} variant="outline" disabled={loading || !password} class="w-full h-10">
+              {#if loading}
+                {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
+              {:else}
+                Use master password
+              {/if}
+            </Button>
+          {:else}
+            <Button onclick={handleUnlock} disabled={loading || !password} class="w-full h-10">
+              {#if loading}
+                {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
+              {:else}
+                Unlock
+              {/if}
+            </Button>
+          {/if}
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center mt-4">
+      <button
+        type="button"
+        onclick={onCancel}
+        disabled={loading}
+        class="text-[11.5px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+      >
+        Open a different database
+      </button>
     </div>
   </div>
 </div>

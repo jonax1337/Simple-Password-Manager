@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, DropdownMenu, DropdownItem, DropdownSeparator } from "$lib/ui";
+  import { DropdownMenu, DropdownItem, DropdownSeparator } from "$lib/ui";
   import GroupTree from "./GroupTree.svelte";
   import {
     Save,
@@ -10,7 +10,10 @@
     Sun,
     Moon,
     Monitor,
-    ChevronUp,
+    ChevronsUpDown,
+    Home,
+    Star,
+    KeyRound,
   } from "@lucide/svelte";
   import type { GroupData } from "$lib/tauri";
   import { appState } from "$lib/app-state.svelte";
@@ -42,28 +45,69 @@
     onLogout,
   }: Props = $props();
 
-  const dbName = $derived(appState.dbPath ? appState.dbPath.split(/[\\/]/).pop() : "");
+  const dbFileName = $derived(appState.dbPath ? appState.dbPath.split(/[\\/]/).pop() ?? "Vault" : "Vault");
+  const dbDisplayName = $derived(dbFileName.replace(/\.kdbx$/i, ""));
+  const accountInitial = $derived((dbDisplayName.trim()[0] ?? "P").toUpperCase());
+
+  type NavItem = { id: string; label: string; icon: typeof Home };
+  const navItems: NavItem[] = [
+    { id: "_dashboard", label: "Home", icon: Home },
+    { id: "_all", label: "All Items", icon: KeyRound },
+    { id: "_favorites", label: "Favorites", icon: Star },
+  ];
 </script>
 
-<aside class="flex flex-col h-full bg-sidebar min-h-0">
-  <!-- Top: database header -->
-  {#if dbName}
-    <div class="px-3 pt-3 pb-2 shrink-0">
-      <div class="flex items-center gap-2.5 rounded-lg bg-background/60 border px-2.5 py-2">
-        <div class="grid place-items-center size-7 rounded-md bg-primary/10 text-primary shrink-0">
-          <Database class="size-3.5" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium truncate" title={appState.dbPath}>{dbName}</div>
-          <div class="text-[10px] text-muted-foreground">
-            {appState.isDirty ? "Unsaved changes" : "Saved"}
-          </div>
+<aside class="flex flex-col h-full bg-sidebar min-h-0 border-r border-border/60">
+  <!-- Vault picker -->
+  <div class="px-3 pt-3 pb-3 shrink-0">
+    <button
+      type="button"
+      class="group/vault w-full flex items-center gap-2.5 rounded-lg bg-background/70 hover:bg-background border border-border/70 hover:border-border px-2.5 py-2 transition-colors shadow-xs text-left"
+      title={appState.dbPath}
+    >
+      <div class="grid place-items-center size-8 rounded-md bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shrink-0 shadow-xs">
+        <Database class="size-4" />
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-[13px] font-semibold truncate leading-tight">{dbDisplayName}</div>
+        <div class="text-[10.5px] text-muted-foreground flex items-center gap-1.5">
+          {#if appState.isDirty}
+            <span class="inline-block size-1.5 rounded-full bg-warning animate-pulse-soft"></span>
+            <span>Unsaved changes</span>
+          {:else}
+            <span class="inline-block size-1.5 rounded-full bg-success/70"></span>
+            <span>All changes saved</span>
+          {/if}
         </div>
       </div>
-    </div>
-  {/if}
+      <ChevronsUpDown class="size-3.5 text-muted-foreground/70 shrink-0 group-hover/vault:text-muted-foreground transition-colors" />
+    </button>
+  </div>
 
-  <!-- Folders / nav -->
+  <!-- Primary nav -->
+  <nav class="px-2 pb-2 space-y-0.5 shrink-0" aria-label="Primary">
+    {#each navItems as item (item.id)}
+      {@const active = selectedUuid === item.id}
+      <button
+        type="button"
+        onclick={() => onSelectGroup(item.id)}
+        class="w-full flex items-center gap-2.5 h-8 px-2.5 rounded-md text-[13px] font-medium transition-colors {active
+          ? 'bg-selected text-selected-foreground'
+          : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground'}"
+      >
+        <item.icon class="size-4 shrink-0" />
+        <span class="truncate">{item.label}</span>
+      </button>
+    {/each}
+  </nav>
+
+  <!-- Folders section -->
+  <div class="px-2 pt-2 pb-1 shrink-0">
+    <div class="px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+      Folders
+    </div>
+  </div>
+
   <div class="flex-1 min-h-0 overflow-hidden">
     {#if rootGroup}
       <GroupTree
@@ -78,31 +122,30 @@
     {/if}
   </div>
 
-  <!-- Bottom: Save + Menu -->
-  <div class="border-t p-2 flex items-center gap-1.5">
-    <Button
-      variant={appState.isDirty ? "default" : "ghost"}
-      size="sm"
-      class="flex-1 justify-start gap-2 h-9"
-      title={appState.isDirty ? "Save (Ctrl+S)" : "No changes to save"}
-      disabled={!appState.isDirty}
+  <!-- Bottom account / actions -->
+  <div class="border-t border-border/60 px-2 py-2 flex items-center gap-1.5 shrink-0">
+    <button
+      type="button"
       onclick={() => void onSave()}
+      disabled={!appState.isDirty}
+      class="flex-1 flex items-center gap-2 h-9 px-2.5 rounded-md text-[12.5px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed {appState.isDirty
+        ? 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs'
+        : 'text-muted-foreground hover:bg-accent/40'}"
+      title={appState.isDirty ? 'Save changes (Ctrl+S)' : 'Database is saved'}
     >
-      <Save class="h-4 w-4" />
-      <span class="text-xs font-medium">
-        {appState.isDirty ? "Save" : "Saved"}
-      </span>
-    </Button>
+      <Save class="size-3.5" />
+      <span>{appState.isDirty ? "Save changes" : "Saved"}</span>
+    </button>
 
     <DropdownMenu align="end" side="top">
       {#snippet trigger()}
         <button
           type="button"
-          class="h-9 w-9 inline-flex items-center justify-center rounded-md hover:bg-accent transition-colors text-foreground/80 border bg-background/60"
-          aria-label="App menu"
-          title="Menu"
+          class="size-9 inline-flex items-center justify-center rounded-md font-semibold text-[11px] bg-background/60 border border-border/70 hover:bg-accent/60 transition-colors text-foreground/85"
+          aria-label="Account menu"
+          title="Account"
         >
-          <ChevronUp class="size-4" />
+          {accountInitial}
         </button>
       {/snippet}
 

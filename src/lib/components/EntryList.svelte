@@ -11,8 +11,6 @@
     ExternalLink,
     Search,
     ArrowUpDown,
-    ArrowDown,
-    ArrowUp,
     CheckSquare,
     X,
   } from "@lucide/svelte";
@@ -85,7 +83,6 @@
     }
   });
 
-  // Reset selection when leaving the current view
   $effect(() => {
     void groupUuid;
     void isFavoritesView;
@@ -155,7 +152,7 @@
     const count = selection.size;
     if (count === 0) return;
     const ok = await ask(
-      `Delete ${count} ${count === 1 ? "entry" : "entries"}? This cannot be undone via the Tauri prompt, but Ctrl+Z will revert it.`,
+      `Delete ${count} ${count === 1 ? "entry" : "entries"}? Ctrl+Z will revert.`,
       { kind: "warning", title: "Delete Entries" },
     );
     if (!ok) return;
@@ -164,12 +161,8 @@
       await Promise.all(snap.map((e) => deleteEntry(e.uuid)));
       undoStack.add(
         `Delete ${count} ${count === 1 ? "entry" : "entries"}`,
-        async () => {
-          await Promise.all(snap.map((e) => createEntry(e)));
-        },
-        async () => {
-          await Promise.all(snap.map((e) => deleteEntry(e.uuid)));
-        },
+        async () => { await Promise.all(snap.map((e) => createEntry(e))); },
+        async () => { await Promise.all(snap.map((e) => deleteEntry(e.uuid))); },
       );
       selection = new Set();
       toast.success("Deleted", `${count} ${count === 1 ? "entry" : "entries"} removed`);
@@ -203,12 +196,8 @@
       await createEntry(newEntry);
       undoStack.add(
         `Create entry "${newEntry.title}"`,
-        async () => {
-          await deleteEntry(entryUuid);
-        },
-        async () => {
-          await createEntry(newEntry);
-        },
+        async () => { await deleteEntry(entryUuid); },
+        async () => { await createEntry(newEntry); },
       );
       toast.success("Entry created");
       showCreate = false;
@@ -245,12 +234,8 @@
       await deleteEntry(entry.uuid);
       undoStack.add(
         `Delete entry "${snap.title}"`,
-        async () => {
-          await createEntry(snap);
-        },
-        async () => {
-          await deleteEntry(snap.uuid);
-        },
+        async () => { await createEntry(snap); },
+        async () => { await deleteEntry(snap.uuid); },
       );
       toast.success("Entry deleted");
       if (selectedEntryUuid === entry.uuid) onSelectEntry("");
@@ -267,12 +252,8 @@
       await updateEntry({ ...entry, is_favorite: next });
       undoStack.add(
         `${next ? "Favorite" : "Unfavorite"} "${entry.title}"`,
-        async () => {
-          await updateEntry({ ...entry, is_favorite: prev });
-        },
-        async () => {
-          await updateEntry({ ...entry, is_favorite: next });
-        },
+        async () => { await updateEntry({ ...entry, is_favorite: prev }); },
+        async () => { await updateEntry({ ...entry, is_favorite: next }); },
       );
       await onRefresh();
     } catch (e) {
@@ -291,37 +272,54 @@
   }
 
   const allChecked = $derived(filtered.length > 0 && selection.size === filtered.length);
+
+  // Deterministic tile tint per entry — keeps the list colorful like 1P,
+  // but stays soft and tinted (no garish full-saturation colors).
+  const tints = [
+    "bg-blue-500/12 text-blue-600 dark:text-blue-300",
+    "bg-violet-500/12 text-violet-600 dark:text-violet-300",
+    "bg-emerald-500/12 text-emerald-600 dark:text-emerald-300",
+    "bg-amber-500/12 text-amber-600 dark:text-amber-300",
+    "bg-rose-500/12 text-rose-600 dark:text-rose-300",
+    "bg-sky-500/12 text-sky-600 dark:text-sky-300",
+    "bg-teal-500/12 text-teal-600 dark:text-teal-300",
+    "bg-indigo-500/12 text-indigo-600 dark:text-indigo-300",
+  ];
+  function tileTint(seed: string): string {
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+    return tints[h % tints.length];
+  }
 </script>
 
 <div class="flex h-full flex-col bg-list">
-  <!-- Header -->
-  <div class="shrink-0 border-b">
-    <div class="flex items-center justify-between px-3 pt-3 pb-2 gap-2">
+  <div class="shrink-0">
+    <div class="flex items-center justify-between px-4 pt-4 pb-2 gap-2">
       <div class="min-w-0 flex-1">
-        <h2 class="text-sm font-semibold truncate" title={selectedGroupName ?? ""}>
+        <h2 class="text-[15px] font-semibold tracking-tight truncate" title={selectedGroupName ?? ""}>
           {#if isFavoritesView}
             Favorites
           {:else if selectedGroupName}
             {selectedGroupName}
           {:else}
-            Entries
+            All Items
           {/if}
         </h2>
-        <p class="text-[11px] text-muted-foreground">
+        <p class="text-[11px] text-muted-foreground mt-0.5">
           {filtered.length}
           {filtered.length === 1 ? "item" : "items"}{filter ? ` · filtered from ${entries.length}` : ""}
         </p>
       </div>
-      <div class="flex items-center gap-1 shrink-0">
+      <div class="flex items-center gap-0.5 shrink-0">
         <DropdownMenu align="end">
           {#snippet trigger()}
             <button
               type="button"
-              class="size-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
+              class="size-8 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Sort"
               title="Sort"
             >
-              <ArrowUpDown class="h-3.5 w-3.5" />
+              <ArrowUpDown class="size-3.5" />
             </button>
           {/snippet}
           <DropdownItem onSelect={() => toggleSort("title")}>
@@ -343,22 +341,27 @@
         </DropdownMenu>
 
         {#if !isSearching && (groupUuid || isFavoritesView)}
-          <Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => (showCreate = true)} title="New entry">
-            <Plus class="h-4 w-4" />
-          </Button>
+          <button
+            type="button"
+            class="size-8 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs"
+            onclick={() => (showCreate = true)}
+            title="New item"
+            aria-label="New item"
+          >
+            <Plus class="size-4" />
+          </button>
         {/if}
       </div>
     </div>
 
-    <!-- Filter -->
-    <div class="px-3 pb-3">
+    <div class="px-4 pb-3">
       <div class="relative">
         <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
         <input
           type="text"
           bind:value={filter}
           placeholder="Filter…"
-          class="h-8 w-full rounded-md border border-input bg-background/60 pl-8 pr-7 text-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+          class="h-8 w-full rounded-md border border-input bg-background/70 pl-8 pr-7 text-[12.5px] outline-none focus-visible:border-ring focus-visible:ring-ring/40 focus-visible:ring-2 transition-shadow"
         />
         {#if filter}
           <button
@@ -374,7 +377,7 @@
     </div>
 
     {#if selection.size > 0}
-      <div class="flex items-center gap-2 border-t bg-primary/5 px-3 py-2">
+      <div class="flex items-center gap-2 border-y border-primary/15 bg-primary/5 px-4 py-2">
         <CheckSquare class="size-4 text-primary" />
         <span class="text-xs font-medium">{selection.size} selected</span>
         <button
@@ -396,22 +399,22 @@
     {/if}
   </div>
 
-  <!-- List -->
   <div class="flex-1 overflow-y-auto">
     {#if filtered.length === 0}
-      <div class="flex h-32 items-center justify-center text-sm text-muted-foreground text-center px-6">
+      <div class="flex h-40 items-center justify-center text-[12.5px] text-muted-foreground text-center px-6">
         {#if entries.length === 0}
-          {isFavoritesView ? "No favorites yet" : groupUuid ? "No entries here yet" : "Select a folder to view entries"}
+          {isFavoritesView ? "No favorites yet" : groupUuid ? "No items here yet" : "Pick a folder to see items"}
         {:else}
-          No entries match "{filter}"
+          No items match "{filter}"
         {/if}
       </div>
     {:else}
-      <ul class="py-1">
+      <ul class="px-2 py-1.5">
         {#each filtered as entry (entry.uuid)}
           {@const iconId = entry.icon_id ?? 0}
           {@const isSelected = selectedEntryUuid === entry.uuid}
           {@const isChecked = selection.has(entry.uuid)}
+          {@const tint = tileTint(entry.uuid)}
           <li>
             <div
               role="button"
@@ -426,11 +429,11 @@
               ondragend={() => {
                 window.__pwLastDraggedEntryGroup = null;
               }}
-              class="group/row w-full flex items-center gap-3 mx-2 my-0.5 px-2 py-2 rounded-md text-left transition-colors cursor-pointer {isSelected
-                ? 'bg-primary text-primary-foreground'
+              class="group/row w-full flex items-center gap-3 px-2 py-2 my-0.5 rounded-lg text-left transition-colors cursor-pointer {isSelected
+                ? 'bg-selected text-selected-foreground'
                 : isChecked
-                  ? 'bg-accent'
-                  : 'hover:bg-accent/60'}"
+                  ? 'bg-accent/70'
+                  : 'hover:bg-accent/50'}"
               onclick={() => onSelectEntry(entry.uuid)}
               onkeydown={(e: KeyboardEvent) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -459,32 +462,28 @@
                 </span>
               </span>
 
-              <span
-                class="grid place-items-center size-9 rounded-lg shrink-0 {isSelected
-                  ? 'bg-primary-foreground/20 text-primary-foreground'
-                  : 'bg-muted text-muted-foreground'}"
-              >
-                <DynamicIcon iconId={iconId} class="size-4" />
+              <span class="grid place-items-center size-10 rounded-lg shrink-0 {tint}">
+                <DynamicIcon iconId={iconId} class="size-[18px]" />
               </span>
 
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-1.5">
-                  <span class="text-sm font-medium truncate">{entry.title || "(untitled)"}</span>
+                  <span class="text-[13.5px] font-semibold truncate">{entry.title || "(untitled)"}</span>
                   {#if entry.is_favorite}
-                    <Star class="h-3 w-3 {isSelected ? 'text-primary-foreground' : 'text-warning fill-warning'} shrink-0" />
+                    <Star class="size-3 text-warning fill-warning shrink-0" />
                   {/if}
                 </div>
                 {#if entry.username}
-                  <div class="text-xs truncate {isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}">{entry.username}</div>
+                  <div class="text-[11.5px] truncate text-muted-foreground mt-0.5">{entry.username}</div>
+                {:else if entry.url}
+                  <div class="text-[11.5px] truncate text-muted-foreground mt-0.5">{entry.url}</div>
                 {/if}
               </div>
 
-              <div
-                class="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 transition-opacity shrink-0"
-              >
+              <div class="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 transition-opacity shrink-0">
                 <button
                   type="button"
-                  class="size-7 inline-flex items-center justify-center rounded {isSelected ? 'hover:bg-primary-foreground/20 text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}"
+                  class="size-7 inline-flex items-center justify-center rounded hover:bg-foreground/8 text-muted-foreground hover:text-foreground"
                   title="Copy password"
                   disabled={!entry.password}
                   onclick={(e: MouseEvent) => {
@@ -492,40 +491,40 @@
                     copy(entry.password, "Password");
                   }}
                 >
-                  <Copy class="h-3.5 w-3.5" />
+                  <Copy class="size-3.5" />
                 </button>
                 <DropdownMenu align="end">
                   {#snippet trigger()}
                     <button
                       type="button"
-                      class="size-7 inline-flex items-center justify-center rounded {isSelected ? 'hover:bg-primary-foreground/20 text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}"
+                      class="size-7 inline-flex items-center justify-center rounded hover:bg-foreground/8 text-muted-foreground hover:text-foreground"
                       aria-label="Entry actions"
                       onclick={(e: MouseEvent) => e.stopPropagation()}
                     >
-                      <MoreHorizontal class="h-3.5 w-3.5" />
+                      <MoreHorizontal class="size-3.5" />
                     </button>
                   {/snippet}
                   <DropdownItem onSelect={() => copy(entry.username, "Username")} disabled={!entry.username}>
-                    <Copy class="h-4 w-4" />
+                    <Copy class="size-4" />
                     <span>Copy username</span>
                   </DropdownItem>
                   <DropdownItem onSelect={() => copy(entry.password, "Password")} disabled={!entry.password}>
-                    <Copy class="h-4 w-4" />
+                    <Copy class="size-4" />
                     <span>Copy password</span>
                   </DropdownItem>
                   {#if entry.url}
                     <DropdownItem onSelect={() => openUrl(entry.url)}>
-                      <ExternalLink class="h-4 w-4" />
+                      <ExternalLink class="size-4" />
                       <span>Open URL</span>
                     </DropdownItem>
                   {/if}
                   <DropdownItem onSelect={() => toggleFavorite(entry)}>
-                    <Star class="h-4 w-4" />
+                    <Star class="size-4" />
                     <span>{entry.is_favorite ? "Unfavorite" : "Favorite"}</span>
                   </DropdownItem>
                   <DropdownSeparator />
                   <DropdownItem destructive onSelect={() => handleDelete(entry)}>
-                    <Trash2 class="h-4 w-4" />
+                    <Trash2 class="size-4" />
                     <span>Delete</span>
                   </DropdownItem>
                 </DropdownMenu>
@@ -538,7 +537,7 @@
   </div>
 </div>
 
-<Dialog bind:open={showCreate} title="Create New Entry" description="Add a new entry to this group">
+<Dialog bind:open={showCreate} title="Create New Item" description="Add a new entry to this folder">
   <div class="space-y-2">
     <Label for="entryTitle">Title</Label>
     <div class="flex gap-2">

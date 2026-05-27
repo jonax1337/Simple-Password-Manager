@@ -3,60 +3,65 @@
 @custom-variant dark (&:is([data-theme="dark"] *));
 
 :root {
-  /* 1Password-inspired light palette */
+  /* 1Password 8 inspired light palette */
   --background: oklch(1 0 0);
-  --foreground: oklch(0.16 0.01 240);
+  --foreground: oklch(0.18 0.012 250);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.16 0.01 240);
+  --card-foreground: oklch(0.18 0.012 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0.01 240);
-  /* Sidebar / list backgrounds — subtly tinted gray like 1P */
-  --sidebar: oklch(0.975 0.005 240);
-  --list: oklch(0.985 0.005 240);
+  --popover-foreground: oklch(0.18 0.012 250);
+  /* Sidebar and list backgrounds — distinctly cooler than the canvas */
+  --sidebar: oklch(0.972 0.006 248);
+  --list: oklch(0.985 0.004 248);
   /* 1Password blue accent */
-  --primary: oklch(0.55 0.2 252);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.965 0.005 240);
-  --secondary-foreground: oklch(0.16 0.01 240);
-  --muted: oklch(0.96 0.005 240);
-  --muted-foreground: oklch(0.5 0.01 240);
-  --accent: oklch(0.95 0.015 252);
+  --primary: oklch(0.55 0.20 252);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.965 0.006 248);
+  --secondary-foreground: oklch(0.18 0.012 250);
+  --muted: oklch(0.96 0.005 248);
+  --muted-foreground: oklch(0.50 0.012 248);
+  --accent: oklch(0.945 0.018 252);
   --accent-foreground: oklch(0.32 0.18 252);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.58 0.235 27);
+  --destructive-foreground: oklch(0.99 0 0);
   --success: oklch(0.6 0.18 145);
   --warning: oklch(0.75 0.16 75);
-  --border: oklch(0.92 0.005 240);
-  --input: oklch(0.92 0.005 240);
-  --ring: oklch(0.55 0.2 252);
+  --border: oklch(0.91 0.006 248);
+  --input: oklch(0.91 0.006 248);
+  --ring: oklch(0.55 0.20 252);
+  /* Soft tinted selection background (used for selected rows / nav items) */
+  --selected: oklch(0.94 0.04 252);
+  --selected-foreground: oklch(0.34 0.18 252);
   --radius: 0.625rem;
 }
 
 [data-theme="dark"] {
-  /* 1Password-inspired dark palette */
-  --background: oklch(0.18 0.005 240);
-  --foreground: oklch(0.96 0.005 240);
-  --card: oklch(0.22 0.005 240);
-  --card-foreground: oklch(0.96 0.005 240);
-  --popover: oklch(0.22 0.005 240);
-  --popover-foreground: oklch(0.96 0.005 240);
-  --sidebar: oklch(0.155 0.005 240);
-  --list: oklch(0.205 0.005 240);
-  --primary: oklch(0.65 0.18 252);
-  --primary-foreground: oklch(0.16 0.01 240);
-  --secondary: oklch(0.265 0.005 240);
-  --secondary-foreground: oklch(0.96 0.005 240);
-  --muted: oklch(0.27 0.005 240);
-  --muted-foreground: oklch(0.7 0.01 240);
-  --accent: oklch(0.3 0.04 252);
-  --accent-foreground: oklch(0.85 0.12 252);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --success: oklch(0.7 0.18 145);
-  --warning: oklch(0.78 0.16 75);
-  --border: oklch(1 0 0 / 8%);
+  /* 1Password 8 inspired dark palette */
+  --background: oklch(0.185 0.008 250);
+  --foreground: oklch(0.965 0.005 248);
+  --card: oklch(0.225 0.008 250);
+  --card-foreground: oklch(0.965 0.005 248);
+  --popover: oklch(0.225 0.008 250);
+  --popover-foreground: oklch(0.965 0.005 248);
+  --sidebar: oklch(0.158 0.008 250);
+  --list: oklch(0.205 0.008 250);
+  --primary: oklch(0.68 0.17 252);
+  --primary-foreground: oklch(0.16 0.012 250);
+  --secondary: oklch(0.265 0.008 250);
+  --secondary-foreground: oklch(0.965 0.005 248);
+  --muted: oklch(0.27 0.008 250);
+  --muted-foreground: oklch(0.70 0.012 248);
+  --accent: oklch(0.32 0.05 252);
+  --accent-foreground: oklch(0.86 0.13 252);
+  --destructive: oklch(0.70 0.19 22);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.72 0.17 145);
+  --warning: oklch(0.80 0.15 75);
+  --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.65 0.18 252);
+  --ring: oklch(0.68 0.17 252);
+  --selected: oklch(0.36 0.10 252);
+  --selected-foreground: oklch(0.92 0.10 252);
 }
 
 @theme inline {
@@ -83,6 +88,8 @@
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-list: var(--list);
+  --color-selected: var(--selected);
+  --color-selected-foreground: var(--selected-foreground);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -109,11 +116,12 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 13.5px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     overflow: hidden;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
   ::selection {
     background-color: var(--color-primary);
@@ -127,12 +135,19 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-border);
+    background: transparent;
     border-radius: 8px;
-    border: 2px solid var(--color-background);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *:hover > ::-webkit-scrollbar-thumb,
+  :hover::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--color-muted-foreground) 30%, transparent);
+    background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-muted-foreground);
+    background: color-mix(in oklch, var(--color-muted-foreground) 55%, transparent);
+    background-clip: padding-box;
   }
   button {
     cursor: pointer;
@@ -151,7 +166,7 @@
   h3,
   h4 {
     font-weight: 600;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.018em;
   }
   h1 {
     font-size: 1.75rem;
@@ -176,13 +191,25 @@
     from { opacity: 0; }
     to { opacity: 1; }
   }
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
   .animate-enter { animation: enter-fade-up 220ms ease-out both; }
   .animate-route { animation: route-fade-in 180ms ease-out both; }
+  .animate-pulse-soft { animation: pulse-soft 1.6s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) {
-    .animate-enter, .animate-route { animation: none !important; }
+    .animate-enter, .animate-route, .animate-pulse-soft { animation: none !important; }
     *, *::before, *::after {
       transition-duration: 0.01ms !important;
       animation-duration: 0.01ms !important;
     }
+  }
+  /* Subtle interactive ring used on the unlock hero icon */
+  .ring-soft {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--color-border) 60%, transparent),
+      0 1px 2px 0 oklch(0 0 0 / 0.04),
+      0 8px 24px -8px color-mix(in oklch, var(--color-primary) 25%, transparent);
   }
 }

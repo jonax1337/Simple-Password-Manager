@@ -2,7 +2,7 @@
   import { Button, Dialog, Input, Label, DropdownMenu, DropdownItem, DropdownSeparator, toast } from "$lib/ui";
   import IconPicker from "./IconPicker.svelte";
   import DynamicIcon from "./DynamicIcon.svelte";
-  import { ChevronRight, Plus, Edit2, Trash2, Star, LayoutPanelLeft, MoreHorizontal } from "@lucide/svelte";
+  import { ChevronRight, Plus, Edit2, Trash2, MoreHorizontal, FolderPlus } from "@lucide/svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { createGroup, renameGroup, deleteGroup, moveGroup, moveEntry, type GroupData } from "$lib/tauri";
   import { saveGroupTreeState } from "$lib/group-state";
@@ -126,7 +126,6 @@
     }
   }
 
-  // ---- Drag & drop ----
   const DT_FOLDER = "application/x-pw-folder";
   const DT_ENTRY = "application/x-pw-entry";
 
@@ -197,7 +196,6 @@
   }
 
   async function handleEntryDrop(entryUuid: string, targetUuid: string) {
-    // EntryList provides a side-channel for the old group via custom event
     const oldGroupUuid = window.__pwLastDraggedEntryGroup ?? null;
     if (oldGroupUuid && oldGroupUuid === targetUuid) return;
     try {
@@ -237,30 +235,36 @@
     ondragover={(e) => onFolderDragOver(e, g.uuid)}
     ondragleave={() => onFolderDragLeave(g.uuid)}
     ondrop={(e) => onFolderDrop(e, g.uuid)}
-    class="group/row flex items-center gap-1 pr-1 py-1 rounded transition-colors {isSelected
-      ? 'bg-accent font-medium'
-      : 'hover:bg-accent/50'} {isDropTarget ? 'ring-2 ring-primary ring-inset bg-primary/10' : ''}"
-    style="padding-left: {depth * 12 + 4}px;"
+    class="group/row flex items-center gap-1 pr-1.5 h-7 rounded-md transition-colors {isSelected
+      ? 'bg-selected text-selected-foreground'
+      : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground'} {isDropTarget
+      ? 'ring-2 ring-primary/60 ring-inset'
+      : ''}"
+    style="padding-left: {depth * 14 + 4}px;"
   >
     <button
       type="button"
-      class="size-5 inline-flex items-center justify-center shrink-0 {hasChildren
-        ? 'hover:bg-muted rounded'
+      class="size-5 inline-flex items-center justify-center shrink-0 rounded {hasChildren
+        ? 'hover:bg-foreground/8'
         : 'invisible'}"
       onclick={(e) => {
         e.stopPropagation();
         if (hasChildren) toggle(g.uuid);
       }}
       tabindex={hasChildren ? 0 : -1}
+      aria-label={isExpanded ? "Collapse" : "Expand"}
     >
-      <ChevronRight class="h-3 w-3 transition-transform duration-200 {isExpanded ? 'rotate-90' : ''}" />
+      <ChevronRight class="size-3 transition-transform duration-150 {isExpanded ? 'rotate-90' : ''}" />
     </button>
 
-    <DynamicIcon iconId={iconId} class="h-4 w-4 text-muted-foreground shrink-0" />
+    <DynamicIcon
+      iconId={iconId}
+      class="size-3.5 shrink-0 {isSelected ? 'text-current' : 'text-muted-foreground'}"
+    />
 
     <button
       type="button"
-      class="flex-1 text-left text-sm truncate"
+      class="flex-1 text-left text-[12.5px] font-medium truncate min-w-0"
       onclick={() => onSelectGroup(g.uuid)}
       ondblclick={(e) => {
         e.stopPropagation();
@@ -275,23 +279,23 @@
         <button
           type="button"
           aria-label="Folder actions"
-          class="opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 size-6 inline-flex items-center justify-center rounded hover:bg-accent"
+          class="opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 size-5 inline-flex items-center justify-center rounded hover:bg-foreground/10"
         >
-          <MoreHorizontal class="h-3.5 w-3.5" />
+          <MoreHorizontal class="size-3.5" />
         </button>
       {/snippet}
       <DropdownItem onSelect={() => openCreate(g.uuid)}>
-        <Plus class="h-4 w-4" />
-        <span>New Subgroup</span>
+        <Plus class="size-4" />
+        <span>New Subfolder</span>
       </DropdownItem>
       <DropdownItem onSelect={() => openRename(g)}>
-        <Edit2 class="h-4 w-4" />
+        <Edit2 class="size-4" />
         <span>Rename</span>
       </DropdownItem>
       {#if depth > 0}
         <DropdownSeparator />
         <DropdownItem destructive onSelect={() => handleDelete(g.uuid)}>
-          <Trash2 class="h-4 w-4" />
+          <Trash2 class="size-4" />
           <span>Delete</span>
         </DropdownItem>
       {/if}
@@ -306,42 +310,25 @@
 {/snippet}
 
 <div class="h-full flex flex-col">
-  <div class="flex items-center justify-between border-b px-3 py-2">
-    <h2 class="text-sm font-semibold">Folders</h2>
-    <Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => openCreate(null)} title="New top-level group">
-      <Plus class="h-4 w-4" />
-    </Button>
-  </div>
-
-  <div class="flex-1 overflow-y-auto p-1">
-    <button
-      type="button"
-      class="w-full flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded transition-colors text-sm font-medium {selectedUuid === '_dashboard'
-        ? 'bg-accent'
-        : 'hover:bg-accent/50'}"
-      onclick={() => onSelectGroup("_dashboard")}
-    >
-      <LayoutPanelLeft class="h-4 w-4 text-muted-foreground shrink-0" />
-      <span class="truncate">Dashboard</span>
-    </button>
-    <button
-      type="button"
-      class="w-full flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded transition-colors text-sm font-medium {selectedUuid === '_favorites'
-        ? 'bg-accent'
-        : 'hover:bg-accent/50'}"
-      onclick={() => onSelectGroup("_favorites")}
-    >
-      <Star class="h-4 w-4 text-muted-foreground shrink-0" />
-      <span class="truncate">Favorites</span>
-    </button>
-
+  <div class="flex-1 overflow-y-auto px-2 pb-2">
     {@render folder(group, 0)}
+  </div>
+  <div class="px-2 pb-2 shrink-0">
+    <button
+      type="button"
+      onclick={() => openCreate(null)}
+      class="w-full flex items-center gap-2 h-7 px-2 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+      title="New top-level folder"
+    >
+      <FolderPlus class="size-3.5" />
+      <span>New folder</span>
+    </button>
   </div>
 </div>
 
-<Dialog bind:open={showCreate} title="Create New Group" description="Enter a name for the new group">
+<Dialog bind:open={showCreate} title="Create New Folder" description="Enter a name for the new folder">
   <div class="space-y-2">
-    <Label for="groupName">Group Name</Label>
+    <Label for="groupName">Folder Name</Label>
     <div class="flex gap-2">
       <IconPicker value={newIconId} onChange={(id) => (newIconId = id)} />
       <!-- svelte-ignore a11y_autofocus -->
@@ -349,7 +336,7 @@
         id="groupName"
         bind:value={newName}
         onkeydown={(e) => e.key === "Enter" && handleCreate()}
-        placeholder="Enter group name"
+        placeholder="Enter folder name"
         class="flex-1"
         autofocus
       />
@@ -361,9 +348,9 @@
   {/snippet}
 </Dialog>
 
-<Dialog bind:open={showRename} title="Rename Group" description="Enter a new name for the group">
+<Dialog bind:open={showRename} title="Rename Folder" description="Enter a new name for the folder">
   <div class="space-y-2">
-    <Label for="renameGroupName">Group Name</Label>
+    <Label for="renameGroupName">Folder Name</Label>
     <div class="flex gap-2">
       <IconPicker value={renameIconId} onChange={(id) => (renameIconId = id)} />
       <!-- svelte-ignore a11y_autofocus -->
@@ -371,7 +358,7 @@
         id="renameGroupName"
         bind:value={renameName}
         onkeydown={(e) => e.key === "Enter" && handleRename()}
-        placeholder="Enter group name"
+        placeholder="Enter folder name"
         class="flex-1"
         autofocus
       />

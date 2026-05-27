@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button, Input, Label, toast } from "$lib/ui";
-  import { FolderOpen, Plus, KeyRound, Fingerprint } from "@lucide/svelte";
+  import { FolderOpen, Plus, KeyRound, Fingerprint, Lock } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openDatabase, helloAvailable, helloIsEnrolled, helloRetrieve } from "$lib/tauri";
@@ -25,6 +25,7 @@
   let helloShown = $state(false);
 
   const yubikeyHint = $derived(filePath ? getYubikeyHint(filePath) : null);
+  const fileLabel = $derived(filePath ? filePath.split(/[\\/]/).pop() : "");
 
   $effect(() => {
     if (!filePath) {
@@ -90,10 +91,7 @@
       const dismissedDbs = JSON.parse(localStorage.getItem("kdf_warning_dismissed_dbs") || "[]");
       if (!dismissedDbs.includes(filePath)) {
         try {
-          const kdfInfo = await invoke<{
-            kdf_type: string;
-            is_weak: boolean;
-          }>("get_kdf_info");
+          const kdfInfo = await invoke<{ kdf_type: string; is_weak: boolean }>("get_kdf_info");
           if (kdfInfo.is_weak) {
             kdfType = kdfInfo.kdf_type;
             showKdfWarning = true;
@@ -144,83 +142,148 @@
   databasePath={filePath}
 />
 
-<div class="flex flex-1 items-center justify-center bg-gradient-to-br from-background to-muted/40">
-  <div class="w-full max-w-md space-y-8 rounded-xl border bg-card p-8 shadow-lg">
-    <div class="flex flex-col items-center space-y-4">
-      <img src="/app-icon.png" alt="Simple Password Manager" width="96" height="96" class="drop-shadow-md" />
-      <h1 class="text-2xl font-bold tracking-tight">Simple Password Manager</h1>
-      <p class="text-sm text-muted-foreground">Open and unlock your password database</p>
+<!-- Two-panel unlock — branding on the left, form on the right (collapses on narrow). -->
+<div class="relative flex h-full w-full overflow-hidden bg-background">
+  <!-- Backdrop atmosphere -->
+  <div
+    class="pointer-events-none absolute inset-0 -z-10"
+    aria-hidden="true"
+    style="
+      background:
+        radial-gradient(900px 600px at 10% 10%, color-mix(in oklch, var(--color-primary) 14%, transparent), transparent 60%),
+        radial-gradient(800px 500px at 90% 100%, color-mix(in oklch, var(--color-primary) 8%, transparent), transparent 60%);
+    "
+  ></div>
+
+  <!-- Brand panel -->
+  <aside class="hidden lg:flex w-[44%] max-w-[520px] flex-col justify-between p-12 border-r border-border/60 bg-sidebar/60 backdrop-blur-sm">
+    <div class="flex items-center gap-2.5">
+      <div class="grid place-items-center size-7 rounded-md bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-bold text-xs shadow-sm">P</div>
+      <span class="text-[13px] font-semibold tracking-tight">Simple Password Manager</span>
     </div>
 
-    <div class="space-y-4">
+    <div class="space-y-6">
+      <div class="grid place-items-center size-20 rounded-3xl bg-primary/10 text-primary ring-soft">
+        <Lock class="size-10" />
+      </div>
+      <div class="space-y-3">
+        <h1 class="text-[34px] font-semibold tracking-tight leading-[1.1]">
+          Your vault,<br/>locked &amp; loaded.
+        </h1>
+        <p class="text-[13.5px] text-muted-foreground leading-relaxed max-w-[360px]">
+          Unlock your KeePass database to access every saved item, generate strong passwords,
+          and keep your accounts in order — all stored locally on your machine.
+        </p>
+      </div>
+    </div>
+
+    <div class="text-[11px] text-muted-foreground/80 space-y-1">
+      <p class="flex items-center gap-1.5">
+        <span class="size-1.5 rounded-full bg-success/70"></span>
+        End-to-end encrypted — your master password never leaves this device.
+      </p>
+    </div>
+  </aside>
+
+  <!-- Form panel -->
+  <main class="flex-1 grid place-items-center px-6 py-10 overflow-y-auto">
+    <div class="w-full max-w-[400px] space-y-7">
+      <div class="lg:hidden flex items-center gap-2.5 justify-center">
+        <div class="grid place-items-center size-7 rounded-md bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-bold text-xs shadow-sm">P</div>
+        <span class="text-[13px] font-semibold tracking-tight">Simple Password Manager</span>
+      </div>
+
       <div class="space-y-2">
-        <Label for="database">Database File</Label>
-        <div class="flex gap-2">
-          <Input id="database" bind:value={filePath} placeholder="Select a .kdbx file" readonly class="flex-1" />
-          <Button type="button" variant="outline" size="icon" onclick={handleSelectFile} title="Open existing database">
-            <FolderOpen class="h-4 w-4" />
-          </Button>
+        <h2 class="text-[22px] font-semibold tracking-tight">Welcome back</h2>
+        <p class="text-[13px] text-muted-foreground">
+          Open your <code class="font-mono text-[12px]">.kdbx</code> file and enter your master password.
+        </p>
+      </div>
+
+      <div class="space-y-4">
+        <div class="space-y-1.5">
+          <Label for="database">Database file</Label>
+          <button
+            type="button"
+            onclick={handleSelectFile}
+            class="group/file w-full flex items-center gap-2.5 h-10 rounded-md border border-input bg-card hover:bg-accent/30 px-3 transition-colors text-left"
+          >
+            <FolderOpen class="size-4 text-muted-foreground shrink-0" />
+            <span class="flex-1 min-w-0 text-[13px] truncate {fileLabel ? '' : 'text-muted-foreground'}">
+              {fileLabel || "Choose a .kdbx file…"}
+            </span>
+            <span class="text-[11px] text-muted-foreground group-hover/file:text-foreground transition-colors">Browse</span>
+          </button>
+          {#if filePath}
+            <p class="text-[10.5px] text-muted-foreground/80 truncate font-mono px-1" title={filePath}>{filePath}</p>
+          {/if}
         </div>
-      </div>
 
-      <div class="space-y-2">
-        <Label for="password">Master Password</Label>
-        <Input
-          id="password"
-          type="password"
-          bind:value={password}
-          onkeydown={(e) => e.key === "Enter" && handleUnlock()}
-          placeholder="Enter your master password"
-        />
-      </div>
+        <div class="space-y-1.5">
+          <Label for="password">Master password</Label>
+          <Input
+            id="password"
+            type="password"
+            bind:value={password}
+            onkeydown={(e) => e.key === "Enter" && handleUnlock()}
+            placeholder="Enter your master password"
+            class="h-10"
+          />
+        </div>
 
-      {#if yubikeyHint}
-        <div class="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm">
-          <KeyRound class="mt-0.5 h-4 w-4 text-primary shrink-0" />
-          <div>
-            <p class="font-medium">Yubikey required</p>
-            <p class="text-xs text-muted-foreground">
-              Plug in your Yubikey (serial #{yubikeyHint.serial_number}) — you'll be asked to touch it after submitting.
-            </p>
+        {#if yubikeyHint}
+          <div class="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <KeyRound class="mt-0.5 size-4 text-primary shrink-0" />
+            <div class="text-[12px] leading-relaxed">
+              <p class="font-medium">Yubikey required</p>
+              <p class="text-muted-foreground">
+                Plug in serial #{yubikeyHint.serial_number} and touch it when prompted.
+              </p>
+            </div>
+          </div>
+        {/if}
+
+        <div class="space-y-2">
+          {#if helloShown}
+            <Button onclick={handleHelloUnlock} disabled={loading || !filePath} class="w-full h-10">
+              <Fingerprint class="size-4" />
+              Unlock with Windows Hello
+            </Button>
+            <Button
+              onclick={handleUnlock}
+              variant="outline"
+              disabled={loading || !filePath || !password}
+              class="w-full h-10"
+            >
+              {#if loading}
+                {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
+              {:else}
+                Use master password
+              {/if}
+            </Button>
+          {:else}
+            <Button onclick={handleUnlock} disabled={loading || !filePath || !password} class="w-full h-10">
+              {#if loading}
+                {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
+              {:else}
+                Unlock database
+              {/if}
+            </Button>
+          {/if}
+        </div>
+
+        <div class="relative my-2">
+          <div class="absolute inset-0 flex items-center"><span class="w-full border-t"></span></div>
+          <div class="relative flex justify-center">
+            <span class="bg-background px-3 text-[10px] uppercase tracking-wider text-muted-foreground">Or</span>
           </div>
         </div>
-      {/if}
 
-      {#if helloShown}
-        <Button onclick={handleHelloUnlock} disabled={loading || !filePath} class="w-full">
-          <Fingerprint class="h-4 w-4" />
-          Unlock with Windows Hello
+        <Button variant="outline" onclick={() => (showCreateDialog = true)} class="w-full h-10">
+          <Plus class="size-4" />
+          Create a new database
         </Button>
-      {/if}
-
-      <Button
-        onclick={handleUnlock}
-        variant={helloShown ? "outline" : "default"}
-        disabled={loading || !filePath || !password}
-        class="w-full"
-      >
-        {#if loading}
-          {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
-        {:else if helloShown}
-          Use master password
-        {:else}
-          Unlock Database
-        {/if}
-      </Button>
-
-      <div class="relative">
-        <div class="absolute inset-0 flex items-center">
-          <span class="w-full border-t"></span>
-        </div>
-        <div class="relative flex justify-center text-xs uppercase">
-          <span class="bg-card px-2 text-muted-foreground">Or</span>
-        </div>
       </div>
-
-      <Button variant="outline" onclick={() => (showCreateDialog = true)} class="w-full">
-        <Plus class="mr-2 h-4 w-4" />
-        Create New Database
-      </Button>
     </div>
-  </div>
+  </main>
 </div>
