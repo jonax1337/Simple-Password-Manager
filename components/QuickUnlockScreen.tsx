@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,34 @@ export function QuickUnlockScreen({
       setLoading(false);
     }
   };
+
+  // Auto-trigger Hello once per screen mount when both:
+  //   - this database has a stored Hello credential
+  //   - the window already has focus (or gains focus shortly)
+  // We don't retry after a cancellation: the user said no, leave them on
+  // the manual screen with the buttons. The ref guard means the click
+  // handler can still fire Hello — it just won't happen twice automatically.
+  const autoTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!helloShown || autoTriggeredRef.current) return;
+
+    const trigger = () => {
+      if (autoTriggeredRef.current) return;
+      autoTriggeredRef.current = true;
+      void handleHelloUnlock();
+    };
+
+    if (document.hasFocus()) {
+      trigger();
+      return;
+    }
+
+    window.addEventListener("focus", trigger, { once: true });
+    return () => {
+      window.removeEventListener("focus", trigger);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [helloShown]);
 
   const handleUnlock = async () => {
     if (!password) {
