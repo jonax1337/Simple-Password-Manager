@@ -41,9 +41,14 @@ tower-http = { version = "0.6", features = ["cors"] }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Security_Credentials",
+  "Win32_System_WinRT",
   "Security_Credentials_UI",
   "Foundation",
 ] }
+# Needed to spell the return type of `IUserConsentVerifierInterop::
+# RequestVerificationForWindowAsync<T>`, which is generic and can't be
+# inferred without an explicit hint.
+windows-future = "0.3"
 
 [[bin]]
 name = "simple-password-manager"

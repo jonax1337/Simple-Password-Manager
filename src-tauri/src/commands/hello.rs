@@ -5,6 +5,13 @@
 //! prompt (Hello face / fingerprint / PIN). The stored secret is bound
 //! to the current Windows user account and isn't roamed across machines.
 //!
+//! On Win32 desktop the bare `UserConsentVerifier::RequestVerificationAsync`
+//! call doesn't surface the system picker — we have to route the call
+//! through `IUserConsentVerifierInterop::RequestVerificationForWindowAsync`
+//! with the HWND of our main window. The WinRT-only path silently
+//! resolves without UI on a desktop app, which is what made the original
+//! implementation appear to do nothing.
+//!
 //! Threat model: someone with read access to your account's credential
 //! store (admin, malware running as your user) can still extract the
 //! password without Hello — we enforce the prompt at the application
@@ -34,14 +41,16 @@ mod imp {
     use windows::Security::Credentials::UI::{
         UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
     };
-    use windows::Win32::Foundation::ERROR_NOT_FOUND;
+    use windows::Win32::Foundation::{ERROR_NOT_FOUND, HWND};
     use windows::Win32::Security::Credentials::{
         CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS,
         CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
     };
+    use windows::Win32::System::WinRT::IUserConsentVerifierInterop;
 
     /// Returns true if a Hello PIN, face, or fingerprint is set up on the
     /// device — i.e. the user could actually be prompted right now.
+    /// This is a pure query, no UI is shown.
     pub async fn available() -> Result<bool, String> {
         let op = UserConsentVerifier::CheckAvailabilityAsync()
             .map_err(|e| format!("CheckAvailabilityAsync failed: {}", e))?;
@@ -51,12 +60,59 @@ mod imp {
         Ok(matches!(avail, UserConsentVerifierAvailability::Available))
     }
 
-    pub async fn store(db_path: &str, password: &str) -> Result<(), String> {
+    /// Trigger the system Hello picker (face / fingerprint / PIN). Returns
+    /// Ok(()) if the user verified, Err("cancelled") if they cancelled,
+    /// Err(other) for any device-side failure. Needs the HWND of a real
+    /// app window — the consent dialog parents itself there.
+    /// `hwnd_raw` is the HWND wrapped as a raw pointer value: it's
+    /// `!Send` as a `HWND` struct but the underlying isize *is* Send,
+    /// so we pass that across the async boundary and reconstitute the
+    /// HWND inside the synchronous setup block. The actual `HWND` value
+    /// only lives long enough to start the IAsyncOperation, and that
+    /// operation is Send (via windows_future's AsyncFuture impl).
+    pub async fn verify(hwnd_raw: isize, prompt: &str) -> Result<(), String> {
+        let title = HSTRING::from(prompt);
+        let op: windows_future::IAsyncOperation<UserConsentVerificationResult> = {
+            let hwnd = HWND(hwnd_raw as *mut _);
+            let interop: IUserConsentVerifierInterop =
+                windows::core::factory::<UserConsentVerifier, IUserConsentVerifierInterop>()
+                    .map_err(|e| format!("UserConsentVerifier interop factory: {}", e))?;
+            unsafe {
+                interop
+                    .RequestVerificationForWindowAsync(hwnd, &title)
+                    .map_err(|e| format!("RequestVerificationForWindowAsync failed: {}", e))?
+            }
+        };
+        let result = op
+            .await
+            .map_err(|e| format!("await RequestVerification: {}", e))?;
+
+        match result {
+            UserConsentVerificationResult::Verified => Ok(()),
+            UserConsentVerificationResult::Canceled => Err("cancelled".to_string()),
+            UserConsentVerificationResult::DeviceNotPresent => {
+                Err("Windows Hello device is not present".into())
+            }
+            UserConsentVerificationResult::NotConfiguredForUser => {
+                Err("Windows Hello is not configured for this user".into())
+            }
+            UserConsentVerificationResult::DisabledByPolicy => {
+                Err("Windows Hello is disabled by policy".into())
+            }
+            UserConsentVerificationResult::DeviceBusy => {
+                Err("Windows Hello device is busy. Try again.".into())
+            }
+            UserConsentVerificationResult::RetriesExhausted => {
+                Err("Windows Hello retry limit reached".into())
+            }
+            other => Err(format!("Hello verification failed: {:?}", other)),
+        }
+    }
+
+    pub fn store(db_path: &str, password: &str) -> Result<(), String> {
         let target = target_for(db_path);
         let target_w: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
 
-        // The credential blob field is a byte buffer — we write the
-        // password as UTF-8 and read it back the same way.
         let mut secret_bytes: Vec<u8> = password.as_bytes().to_vec();
 
         let cred = CREDENTIALW {
@@ -83,23 +139,7 @@ mod imp {
         Ok(())
     }
 
-    /// Prompt Hello first. On success, read the stored password and return
-    /// it. On user cancellation, return Err with a distinctive message so
-    /// the frontend can fall back to the master-password input silently.
-    pub async fn retrieve(db_path: &str) -> Result<String, String> {
-        let title = HSTRING::from("Unlock your password database");
-        let op = UserConsentVerifier::RequestVerificationAsync(&title)
-            .map_err(|e| format!("RequestVerificationAsync failed: {}", e))?;
-        let result = op
-            .await
-            .map_err(|e| format!("await RequestVerification: {}", e))?;
-
-        match result {
-            UserConsentVerificationResult::Verified => {}
-            UserConsentVerificationResult::Canceled => return Err("cancelled".to_string()),
-            _ => return Err(format!("Hello verification failed: {:?}", result)),
-        }
-
+    pub fn read_secret(db_path: &str) -> Result<String, String> {
         let target = target_for(db_path);
         let target_w: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
 
@@ -130,7 +170,7 @@ mod imp {
         }
     }
 
-    pub async fn clear(db_path: &str) -> Result<(), String> {
+    pub fn clear(db_path: &str) -> Result<(), String> {
         let target = target_for(db_path);
         let target_w: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
         unsafe {
@@ -149,7 +189,7 @@ mod imp {
     /// Probe whether a credential exists for this DB without prompting
     /// Hello. Lets the unlock screen decide whether to show the Hello
     /// button without burning a biometric scan on every render.
-    pub async fn is_enrolled(db_path: &str) -> Result<bool, String> {
+    pub fn is_enrolled(db_path: &str) -> Result<bool, String> {
         let target = target_for(db_path);
         let target_w: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
         unsafe {
@@ -178,21 +218,42 @@ mod imp {
     pub async fn available() -> Result<bool, String> {
         Ok(false)
     }
-    pub async fn store(_db_path: &str, _password: &str) -> Result<(), String> {
+    pub async fn verify(_hwnd_raw: isize, _prompt: &str) -> Result<(), String> {
         Err("Windows Hello is only available on Windows".to_string())
     }
-    pub async fn retrieve(_db_path: &str) -> Result<String, String> {
+    pub fn store(_db_path: &str, _password: &str) -> Result<(), String> {
         Err("Windows Hello is only available on Windows".to_string())
     }
-    pub async fn clear(_db_path: &str) -> Result<(), String> {
+    pub fn read_secret(_db_path: &str) -> Result<String, String> {
+        Err("Windows Hello is only available on Windows".to_string())
+    }
+    pub fn clear(_db_path: &str) -> Result<(), String> {
         Ok(())
     }
-    pub async fn is_enrolled(_db_path: &str) -> Result<bool, String> {
+    pub fn is_enrolled(_db_path: &str) -> Result<bool, String> {
         Ok(false)
     }
 }
 
 // ----------------------------- Tauri commands -----------------------------
+
+/// Returns the main window's HWND as a Send-friendly isize so it can
+/// cross async boundaries. The caller reconstitutes a `HWND` from it
+/// only inside the synchronous Win32 setup section.
+#[cfg(windows)]
+fn main_window_hwnd_raw(app: &tauri::AppHandle) -> Result<isize, String> {
+    use tauri::Manager;
+    let window = app
+        .get_webview_window("main")
+        .ok_or("main window not available")?;
+    let raw = window
+        .hwnd()
+        .map_err(|e| format!("failed to get HWND: {}", e))?;
+    // Tauri's HWND wraps a `*mut c_void`; cast to isize so the value is
+    // Send. We don't dereference it on Rust's side, just hand it back
+    // to Windows on a single thread later.
+    Ok(raw.0 as isize)
+}
 
 #[tauri::command]
 pub async fn hello_available() -> Result<bool, String> {
@@ -200,38 +261,73 @@ pub async fn hello_available() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn hello_is_enrolled(db_path: String) -> Result<bool, String> {
+pub fn hello_is_enrolled(db_path: String) -> Result<bool, String> {
     if db_path.is_empty() {
         return Ok(false);
     }
-    imp::is_enrolled(&db_path).await
+    imp::is_enrolled(&db_path)
 }
 
+/// Storing a credential is gated by a live Hello prompt: the user has
+/// to prove they're physically present before we write the secret. This
+/// also doubles as a smoke-test of the Hello integration at setup time.
 #[tauri::command]
-pub async fn hello_store(db_path: String, password: String) -> Result<(), String> {
+#[allow(unused_variables)]
+pub async fn hello_store(
+    app: tauri::AppHandle,
+    db_path: String,
+    password: String,
+) -> Result<(), String> {
     if db_path.is_empty() {
         return Err("db_path is required".into());
     }
     if password.is_empty() {
         return Err("password is required".into());
     }
-    imp::store(&db_path, &password).await
+
+    #[cfg(windows)]
+    {
+        let hwnd_raw = main_window_hwnd_raw(&app)?;
+        imp::verify(hwnd_raw, "Confirm to save your master password for Windows Hello unlock")
+            .await?;
+        imp::store(&db_path, &password)
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err("Windows Hello is only available on Windows".to_string())
+    }
 }
 
 #[tauri::command]
-pub async fn hello_retrieve(db_path: String) -> Result<String, String> {
+#[allow(unused_variables)]
+pub async fn hello_retrieve(
+    app: tauri::AppHandle,
+    db_path: String,
+) -> Result<String, String> {
     if db_path.is_empty() {
         return Err("db_path is required".into());
     }
-    imp::retrieve(&db_path).await
+
+    #[cfg(windows)]
+    {
+        let hwnd_raw = main_window_hwnd_raw(&app)?;
+        imp::verify(hwnd_raw, "Unlock your password database").await?;
+        imp::read_secret(&db_path)
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err("Windows Hello is only available on Windows".to_string())
+    }
 }
 
 #[tauri::command]
-pub async fn hello_clear(db_path: String) -> Result<(), String> {
+pub fn hello_clear(db_path: String) -> Result<(), String> {
     if db_path.is_empty() {
         return Ok(());
     }
-    imp::clear(&db_path).await
+    imp::clear(&db_path)
 }
 
 #[cfg(test)]
@@ -240,7 +336,6 @@ mod tests {
 
     #[test]
     fn target_for_is_stable() {
-        // Same input → same target name, so we can find the credential later.
         let a = target_for("/tmp/foo.kdbx");
         let b = target_for("/tmp/foo.kdbx");
         assert_eq!(a, b);
