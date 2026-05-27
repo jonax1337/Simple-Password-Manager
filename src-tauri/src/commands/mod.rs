@@ -2,6 +2,7 @@ pub mod browser_extension;
 pub mod database;
 pub mod entry;
 pub mod group;
+pub mod hello;
 pub mod password;
 pub mod search;
 pub mod security;

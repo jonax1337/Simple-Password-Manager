@@ -5,8 +5,8 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FolderOpen, Plus, KeyRound } from "lucide-react";
-import { openDatabase } from "@/lib/tauri";
+import { FolderOpen, Plus, KeyRound, Fingerprint } from "lucide-react";
+import { openDatabase, helloAvailable, helloIsEnrolled, helloRetrieve } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CreateDatabaseDialog } from "@/components/CreateDatabaseDialog";
@@ -41,6 +41,57 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
   // is picked, so the user knows to plug their key in before clicking
   // Unlock instead of getting an opaque "incorrect password" error.
   const yubikeyHint = filePath ? getYubikeyHint(filePath) : null;
+
+  // Windows Hello availability + enrolment for the picked DB. The button
+  // only shows when both are true: the device has Hello AND a credential
+  // exists for this database.
+  const [helloShown, setHelloShown] = useState(false);
+  useEffect(() => {
+    if (!filePath) {
+      setHelloShown(false);
+      return;
+    }
+    void (async () => {
+      try {
+        const [avail, enrolled] = await Promise.all([
+          helloAvailable(),
+          helloIsEnrolled(filePath),
+        ]);
+        setHelloShown(avail && enrolled);
+      } catch {
+        setHelloShown(false);
+      }
+    })();
+  }, [filePath]);
+
+  const handleHelloUnlock = async () => {
+    if (!filePath) return;
+    setLoading(true);
+    try {
+      const pw = await helloRetrieve(filePath);
+      const [, ] = await openDatabase(filePath, pw, yubikeyHint);
+      saveLastDatabasePath(filePath);
+      addRecentDatabase(filePath);
+      toast({
+        title: "Success",
+        description: "Database unlocked with Windows Hello",
+        variant: "success",
+      });
+      onUnlock();
+    } catch (error: any) {
+      // "cancelled" is a soft error — don't toast, the user just hit cancel
+      const msg = error?.toString() ?? "";
+      if (!msg.includes("cancelled")) {
+        toast({
+          title: "Hello unlock failed",
+          description: msg || "Could not unlock with Windows Hello",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSelectFile = async () => {
     try {
@@ -236,8 +287,21 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
               </div>
             )}
 
+            {helloShown && (
+              <Button
+                variant="default"
+                onClick={handleHelloUnlock}
+                disabled={loading || !filePath}
+                className="w-full gap-2"
+              >
+                <Fingerprint className="h-4 w-4" />
+                Unlock with Windows Hello
+              </Button>
+            )}
+
             <Button
               onClick={handleUnlock}
+              variant={helloShown ? "outline" : "default"}
               disabled={loading || !filePath || !password}
               className="w-full"
             >
@@ -245,7 +309,9 @@ export function UnlockScreen({ onUnlock, initialFilePath }: UnlockScreenProps) {
                 ? yubikeyHint
                   ? "Touch your Yubikey…"
                   : "Unlocking..."
-                : "Unlock Database"}
+                : helloShown
+                  ? "Use master password"
+                  : "Unlock Database"}
             </Button>
 
             <div className="relative">

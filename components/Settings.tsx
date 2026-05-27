@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw, Rocket, Download, Puzzle, KeyRound } from "lucide-react";
+import { Settings as SettingsIcon, Moon, Sun, Monitor, Lock, Timer, X, Minimize2, ShieldAlert, RefreshCw, Rocket, Download, Puzzle, KeyRound, Fingerprint } from "lucide-react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useTheme } from "next-themes";
 import { ask } from "@tauri-apps/plugin-dialog";
@@ -25,7 +25,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
 import { getHibpEnabled, setHibpEnabled, getLiveUpdates, setLiveUpdates, getCloseToTray, setCloseToTray, getYubikeyHint, setYubikeyHint } from "@/lib/storage";
-import { detectBrowsers, installNativeHost, uninstallNativeHost, type BrowserInfo, type InstallReport, listYubikeys, enableYubikey, disableYubikey, yubikeyEnabledForOpenDb, type YubikeyInfo } from "@/lib/tauri";
+import { detectBrowsers, installNativeHost, uninstallNativeHost, type BrowserInfo, type InstallReport, listYubikeys, enableYubikey, disableYubikey, yubikeyEnabledForOpenDb, type YubikeyInfo, helloAvailable, helloIsEnrolled, helloStore, helloClear } from "@/lib/tauri";
 import {
   Dialog,
   DialogContent,
@@ -70,6 +70,18 @@ export function Settings() {
   const [yubikeyBusy, setYubikeyBusy] = useState(false);
   const [yubikeyError, setYubikeyError] = useState<string>("");
 
+  // ---------- Windows Hello state ----------
+  // `helloAvail` is "Hello is set up on this device" (PIN/Face/Fingerprint
+  // registered with Windows). `helloEnrolled` is "this database has a
+  // stored credential gated by Hello". Two-step dialog: turning ON asks
+  // for the master password so we can write it to the credential store.
+  const [helloAvail, setHelloAvail] = useState<boolean>(false);
+  const [helloEnrolled, setHelloEnrolled] = useState<boolean>(false);
+  const [helloDialogOpen, setHelloDialogOpen] = useState(false);
+  const [helloPassword, setHelloPassword] = useState("");
+  const [helloBusy, setHelloBusy] = useState(false);
+  const [helloError, setHelloError] = useState<string>("");
+
   useEffect(() => {
     setMounted(true);
     // Load auto-lock setting from localStorage
@@ -95,6 +107,11 @@ export function Settings() {
     yubikeyEnabledForOpenDb()
       .then(setYubikeyActive)
       .catch(() => setYubikeyActive(false));
+    // Probe Windows Hello availability + enrolment for the current DB.
+    helloAvailable().then(setHelloAvail).catch(() => setHelloAvail(false));
+    if (dbPath) {
+      helloIsEnrolled(dbPath).then(setHelloEnrolled).catch(() => setHelloEnrolled(false));
+    }
   }, []);
 
   // -- Yubikey handlers --
@@ -158,6 +175,50 @@ export function Settings() {
       setYubikeyError(e instanceof Error ? e.message : String(e));
     } finally {
       setYubikeyBusy(false);
+    }
+  }
+
+  // -- Windows Hello handlers --
+
+  async function handleHelloToggle(checked: boolean) {
+    if (checked) {
+      setHelloPassword("");
+      setHelloError("");
+      setHelloDialogOpen(true);
+      return;
+    }
+    setHelloBusy(true);
+    setHelloError("");
+    try {
+      await helloClear(currentDbPath);
+      setHelloEnrolled(false);
+    } catch (e) {
+      setHelloError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHelloBusy(false);
+    }
+  }
+
+  async function confirmEnableHello() {
+    if (!helloPassword) {
+      setHelloError("Enter your master password to confirm.");
+      return;
+    }
+    setHelloBusy(true);
+    setHelloError("");
+    try {
+      // We don't verify the password against the live database here on
+      // purpose — the user has just unlocked it to get to Settings, so
+      // a typo would only show up at the next Hello unlock and they'd
+      // fall back to the master-password input anyway.
+      await helloStore(currentDbPath, helloPassword);
+      setHelloEnrolled(true);
+      setHelloDialogOpen(false);
+      setHelloPassword("");
+    } catch (e) {
+      setHelloError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHelloBusy(false);
     }
   }
 
@@ -581,6 +642,107 @@ export function Settings() {
                       disabled={yubikeyBusy || yubikeySelected === null}
                     >
                       {yubikeyBusy ? "Saving — touch your key…" : "Enable Yubikey"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Fingerprint className="h-4 w-4 text-muted-foreground" />
+                    <CardTitle className="text-sm font-medium">Windows Hello</CardTitle>
+                  </div>
+                  <CardDescription>
+                    Unlock with face, fingerprint, or PIN instead of typing the master password.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="hello-toggle" className="text-sm">
+                        Use Windows Hello to unlock
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {helloEnrolled
+                          ? "Your master password is stored in Windows Credential Manager and released after a Hello prompt."
+                          : helloAvail
+                            ? "We store your master password encrypted by your Windows account, then ask Hello to release it."
+                            : "Windows Hello isn't set up on this device. Configure it in Windows Settings → Accounts → Sign-in options first."}
+                      </p>
+                    </div>
+                    <Switch
+                      id="hello-toggle"
+                      checked={helloEnrolled}
+                      onCheckedChange={handleHelloToggle}
+                      disabled={!currentDbPath || !helloAvail || helloBusy}
+                    />
+                  </div>
+                  {!currentDbPath && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500 mt-3">
+                      No database is currently open. This setting is per-database.
+                    </p>
+                  )}
+                  {helloError && !helloDialogOpen && (
+                    <p className="text-xs text-destructive mt-3">{helloError}</p>
+                  )}
+                  {helloEnrolled && yubikeyActive && (
+                    <p className="text-xs text-muted-foreground mt-3">
+                      Note: Yubikey is still required on every unlock — Hello only
+                      saves you from typing the master password.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Dialog
+                open={helloDialogOpen}
+                onOpenChange={(open) => {
+                  if (!helloBusy) setHelloDialogOpen(open);
+                }}
+              >
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Enable Windows Hello</DialogTitle>
+                    <DialogDescription>
+                      Confirm your master password so we can store it in the Windows
+                      Credential Manager. Future unlocks will ask Hello instead of
+                      typing this password.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-3 py-2">
+                    <Label htmlFor="hello-pw" className="text-sm">
+                      Master password
+                    </Label>
+                    <Input
+                      id="hello-pw"
+                      type="password"
+                      value={helloPassword}
+                      onChange={(e) => setHelloPassword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !helloBusy) void confirmEnableHello();
+                      }}
+                      autoFocus
+                    />
+                    {helloError && (
+                      <p className="text-xs text-destructive">{helloError}</p>
+                    )}
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setHelloDialogOpen(false)}
+                      disabled={helloBusy}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={confirmEnableHello}
+                      disabled={helloBusy || !helloPassword}
+                    >
+                      {helloBusy ? "Saving…" : "Enable Hello"}
                     </Button>
                   </DialogFooter>
                 </DialogContent>

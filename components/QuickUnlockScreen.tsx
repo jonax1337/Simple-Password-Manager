@@ -1,18 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Image from "next/image";
-import { openDatabase } from "@/lib/tauri";
+import { openDatabase, helloAvailable, helloIsEnrolled, helloRetrieve } from "@/lib/tauri";
 import { useToast } from "@/components/ui/use-toast";
 import { KdfWarningDialog } from "@/components/KdfWarningDialog";
 import { CustomTitleBar } from "@/components/CustomTitleBar";
 import { addRecentDatabase, getYubikeyHint } from "@/lib/storage";
 import { invoke } from "@tauri-apps/api/core";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Fingerprint } from "lucide-react";
 
 interface QuickUnlockScreenProps {
   lastDatabasePath: string;
@@ -31,6 +31,49 @@ export function QuickUnlockScreen({
   const [kdfType, setKdfType] = useState("");
   const { toast } = useToast();
   const yubikeyHint = getYubikeyHint(lastDatabasePath);
+
+  // Windows Hello probe: only show the button if the device has Hello set
+  // up AND this database has a stored credential.
+  const [helloShown, setHelloShown] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [avail, enrolled] = await Promise.all([
+          helloAvailable(),
+          helloIsEnrolled(lastDatabasePath),
+        ]);
+        setHelloShown(avail && enrolled);
+      } catch {
+        setHelloShown(false);
+      }
+    })();
+  }, [lastDatabasePath]);
+
+  const handleHelloUnlock = async () => {
+    setLoading(true);
+    try {
+      const pw = await helloRetrieve(lastDatabasePath);
+      const [, ] = await openDatabase(lastDatabasePath, pw, yubikeyHint);
+      addRecentDatabase(lastDatabasePath);
+      toast({
+        title: "Success",
+        description: "Database unlocked with Windows Hello",
+        variant: "success",
+      });
+      onUnlock();
+    } catch (error: any) {
+      const msg = error?.toString() ?? "";
+      if (!msg.includes("cancelled")) {
+        toast({
+          title: "Hello unlock failed",
+          description: msg || "Could not unlock with Windows Hello",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleUnlock = async () => {
     if (!password) {
@@ -177,8 +220,20 @@ export function QuickUnlockScreen({
             </div>
           )}
 
+          {helloShown && (
+            <Button
+              onClick={handleHelloUnlock}
+              disabled={loading}
+              className="w-full gap-2"
+            >
+              <Fingerprint className="h-4 w-4" />
+              Unlock with Windows Hello
+            </Button>
+          )}
+
           <Button
             onClick={handleUnlock}
+            variant={helloShown ? "outline" : "default"}
             disabled={loading || !password}
             className="w-full"
           >
@@ -186,7 +241,9 @@ export function QuickUnlockScreen({
               ? yubikeyHint
                 ? "Touch your Yubikey…"
                 : "Unlocking..."
-              : "Unlock"}
+              : helloShown
+                ? "Use master password"
+                : "Unlock"}
           </Button>
 
           <Button

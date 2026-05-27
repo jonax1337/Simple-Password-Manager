@@ -93,6 +93,11 @@ fn main() {
             commands::yubikey::enable_yubikey,
             commands::yubikey::disable_yubikey,
             commands::yubikey::yubikey_enabled_for_open_db,
+            commands::hello::hello_available,
+            commands::hello::hello_is_enrolled,
+            commands::hello::hello_store,
+            commands::hello::hello_retrieve,
+            commands::hello::hello_clear,
         ])
         .setup(|app| {
             // Set up system tray

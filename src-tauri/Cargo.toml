@@ -34,6 +34,17 @@ axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync"] }
 tower-http = { version = "0.6", features = ["cors"] }
 
+# Windows Hello via Credential Manager + UserConsentVerifier. Only
+# pulled in on Windows; the lib stays cross-platform. Other targets
+# get stub commands that report Hello as unavailable.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Security_Credentials",
+  "Security_Credentials_UI",
+  "Foundation",
+] }
+
 [[bin]]
 name = "simple-password-manager"
 path = "src/main.rs"

@@ -107,6 +107,28 @@ export async function yubikeyEnabledForOpenDb(): Promise<boolean> {
   return invoke("yubikey_enabled_for_open_db");
 }
 
+// --- Windows Hello commands ---
+
+export async function helloAvailable(): Promise<boolean> {
+  return invoke("hello_available");
+}
+
+export async function helloIsEnrolled(dbPath: string): Promise<boolean> {
+  return invoke("hello_is_enrolled", { dbPath });
+}
+
+export async function helloStore(dbPath: string, password: string): Promise<void> {
+  return invoke("hello_store", { dbPath, password });
+}
+
+export async function helloRetrieve(dbPath: string): Promise<string> {
+  return invoke("hello_retrieve", { dbPath });
+}
+
+export async function helloClear(dbPath: string): Promise<void> {
+  return invoke("hello_clear", { dbPath });
+}
+
 export async function saveDatabase(): Promise<void> {
   return await invoke<void>("save_database");
 }
