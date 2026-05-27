@@ -2,56 +2,65 @@
   import { onMount } from "svelte";
   import {
     getGroups,
+    getEntry,
     getFavoriteEntries,
     saveDatabase,
     closeDatabase,
     searchEntries,
-    searchEntriesInGroup,
     checkDatabaseChanges,
     mergeDatabase,
     type GroupData,
     type EntryData,
   } from "$lib/tauri";
-  import {
-    getSearchScope,
-    saveSearchScope,
-    getLiveUpdates,
-    getCloseToTray,
-    type SearchScope,
-  } from "$lib/storage";
+  import { getLiveUpdates, getCloseToTray } from "$lib/storage";
   import { appState } from "$lib/app-state.svelte";
+  import { undoStack } from "$lib/undo-stack.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import GroupTree from "$lib/components/GroupTree.svelte";
+  import Sidebar from "$lib/components/Sidebar.svelte";
   import EntryList from "$lib/components/EntryList.svelte";
+  import EntryEditor from "$lib/components/EntryEditor.svelte";
+  import EmptyDetail from "$lib/components/EmptyDetail.svelte";
   import Dashboard from "$lib/components/Dashboard.svelte";
   import SplitPane from "$lib/components/SplitPane.svelte";
   import UnsavedChangesDialog from "$lib/components/UnsavedChangesDialog.svelte";
   import DatabaseConflictDialog from "$lib/components/DatabaseConflictDialog.svelte";
-  import { Button, Input, toast } from "$lib/ui";
-  import { Save, LogOut, Search, X, Settings, Info } from "@lucide/svelte";
+  import CommandPalette, { type PaletteCommand } from "$lib/components/CommandPalette.svelte";
+  import { toast } from "$lib/ui";
+  import {
+    Save,
+    LogOut,
+    Settings as SettingsIcon,
+    Info,
+    Sun,
+    Moon,
+    Monitor,
+    Star,
+    LayoutPanelLeft,
+    Key,
+    Folder,
+    Undo2,
+    Redo2,
+  } from "@lucide/svelte";
   import { loadGroupTreeState } from "$lib/group-state";
   import { getGroupPath } from "$lib/group-utils";
   import { push } from "svelte-spa-router";
+  import { theme } from "$lib/theme.svelte";
 
   type Props = { onClose: (isManualLogout?: boolean) => void };
   let { onClose }: Props = $props();
 
   let rootGroup = $state<GroupData | null>(null);
   let selectedUuid = $state<string>("_dashboard");
+  let selectedEntryUuid = $state<string>("");
   let favoriteEntries = $state<EntryData[]>([]);
   let isFavoritesView = $state(false);
   let isDashboardView = $state(true);
-
-  let searchQuery = $state("");
-  let searchResults = $state<EntryData[]>([]);
-  let isSearching = $state(false);
-  let isSearchVisible = $state(false);
-  let searchScope = $state<SearchScope>("global");
 
   let showUnsaved = $state(false);
   let closeAction = $state<"logout" | "window" | null>(null);
   let showConflict = $state(false);
   let liveUpdatesEnabled = $state(false);
+  let paletteOpen = $state(false);
 
   let initialExpanded: Set<string> | undefined = $state(undefined);
 
@@ -78,7 +87,6 @@
     if (appState.dbPath) {
       const state = loadGroupTreeState(appState.dbPath, groups.uuid, groups);
       initialExpanded = new Set(state.expandedGroups);
-      searchScope = getSearchScope(appState.dbPath);
       liveUpdatesEnabled = getLiveUpdates(appState.dbPath);
     }
     selectedUuid = "_dashboard";
@@ -95,7 +103,6 @@
     }
   });
 
-  // Live updates polling
   $effect(() => {
     if (!liveUpdatesEnabled || !appState.dbPath || appState.isDirty) return;
     const iv = setInterval(async () => {
@@ -117,9 +124,7 @@
 
   async function selectGroup(uuid: string) {
     selectedUuid = uuid;
-    isSearching = false;
-    searchQuery = "";
-    searchResults = [];
+    selectedEntryUuid = "";
     if (uuid === "_dashboard") {
       isDashboardView = true;
       isFavoritesView = false;
@@ -140,14 +145,29 @@
     }
   }
 
+  // Navigate to an entry, switching to its folder first if needed
+  async function jumpToEntry(uuid: string) {
+    try {
+      const e = await getEntry(uuid);
+      await selectGroup(e.group_uuid);
+      // give the list a tick to load
+      await new Promise((r) => setTimeout(r, 30));
+      selectedEntryUuid = uuid;
+    } catch (err) {
+      toast.error("Could not open entry", String(err));
+    }
+  }
+
   async function performClose(manual: boolean) {
     try {
       const win = getCurrentWindow();
       await win.setTitle("Simple Password Manager");
       selectedUuid = "";
+      selectedEntryUuid = "";
       isDashboardView = true;
       isFavoritesView = false;
       rootGroup = null;
+      undoStack.clear();
       await closeDatabase();
       onClose(manual);
     } catch (e) {
@@ -179,41 +199,24 @@
     }
   }
 
-  async function handleSearch(q: string) {
-    searchQuery = q;
-    if (!q.trim()) {
-      isSearching = false;
-      searchResults = [];
-      return;
-    }
-    isSearching = true;
-    try {
-      const canScopeToFolder = !isDashboardView && !isFavoritesView && selectedUuid !== "";
-      let results: EntryData[];
-      if (searchScope === "folder" && canScopeToFolder) {
-        results = await searchEntriesInGroup(q, selectedUuid);
-      } else {
-        results = await searchEntries(q);
-      }
-      if (isFavoritesView && searchScope === "folder") {
-        results = results.filter((e) => e.is_favorite);
-      }
-      searchResults = results;
-    } catch (e) {
-      toast.error("Search failed", String(e));
+  async function handleUndo() {
+    const desc = await undoStack.undo();
+    if (desc) {
+      appState.markDirty();
+      appState.refresh();
+      toast.success("Undone", desc);
     }
   }
 
-  function toggleSearch() {
-    isSearchVisible = !isSearchVisible;
-    if (!isSearchVisible) {
-      searchQuery = "";
-      searchResults = [];
-      isSearching = false;
+  async function handleRedo() {
+    const desc = await undoStack.redo();
+    if (desc) {
+      appState.markDirty();
+      appState.refresh();
+      toast.success("Redone", desc);
     }
   }
 
-  // Conflict handling
   async function syncAndSave() {
     try {
       await mergeDatabase();
@@ -240,116 +243,202 @@
     }
   }
 
-  // Keyboard shortcuts
+  function isEditable(el: EventTarget | null): boolean {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el.dataset.commandPaletteInput !== undefined) return false;
+    const tag = el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (el.isContentEditable) return true;
+    return false;
+  }
+
   function onKey(e: KeyboardEvent) {
     const isMac = /Mac|iPhone|iPad/i.test(navigator.platform);
     const mod = isMac ? e.metaKey : e.ctrlKey;
-    if (mod && e.key === "s") {
+    if (mod && e.key.toLowerCase() === "s") {
       e.preventDefault();
       void handleSave();
-    } else if (mod && e.key === "f") {
+    } else if (mod && e.key.toLowerCase() === "k") {
+      if (paletteOpen) return;
+      if (isEditable(e.target)) return;
       e.preventDefault();
-      toggleSearch();
-    } else if (e.key === "Escape" && isSearchVisible) {
-      toggleSearch();
+      paletteOpen = true;
+    } else if (mod && e.shiftKey && e.key.toLowerCase() === "z") {
+      if (isEditable(e.target)) return;
+      e.preventDefault();
+      void handleRedo();
+    } else if (mod && e.key.toLowerCase() === "z") {
+      if (isEditable(e.target)) return;
+      e.preventDefault();
+      void handleUndo();
+    } else if (mod && e.key.toLowerCase() === "y") {
+      if (isEditable(e.target)) return;
+      e.preventDefault();
+      void handleRedo();
     }
   }
 
   const groupName = $derived(
-    isSearching
-      ? undefined
-      : isFavoritesView
-        ? "Favorites"
-        : rootGroup && selectedUuid && !selectedUuid.startsWith("_")
-          ? getGroupPath(rootGroup, selectedUuid)
-          : undefined,
+    isFavoritesView
+      ? "Favorites"
+      : rootGroup && selectedUuid && !selectedUuid.startsWith("_")
+        ? getGroupPath(rootGroup, selectedUuid)
+        : undefined,
   );
 
   function onRefresh() {
     appState.markDirty();
     appState.refresh();
   }
+
+  const actionCommands: PaletteCommand[] = $derived([
+    {
+      id: "go-dashboard",
+      label: "Go to Dashboard",
+      section: "Navigate",
+      icon: LayoutPanelLeft,
+      keywords: "home stats",
+      onSelect: () => selectGroup("_dashboard"),
+    },
+    {
+      id: "go-favorites",
+      label: "Go to Favorites",
+      section: "Navigate",
+      icon: Star,
+      onSelect: () => selectGroup("_favorites"),
+    },
+    { id: "act-save", label: "Save database", section: "Actions", icon: Save, hint: "Ctrl S", onSelect: handleSave },
+    { id: "act-undo", label: "Undo last action", section: "Actions", icon: Undo2, hint: "Ctrl Z", onSelect: handleUndo },
+    { id: "act-redo", label: "Redo last action", section: "Actions", icon: Redo2, hint: "Ctrl Y", onSelect: handleRedo },
+    {
+      id: "act-settings",
+      label: "Open Settings",
+      section: "Actions",
+      icon: SettingsIcon,
+      onSelect: () => push("/settings"),
+    },
+    {
+      id: "act-about",
+      label: "Open About",
+      section: "Actions",
+      icon: Info,
+      onSelect: () => push("/about"),
+    },
+    { id: "act-lock", label: "Lock database", section: "Actions", icon: LogOut, onSelect: handleLogout },
+    { id: "theme-system", label: "Theme: System", section: "Theme", icon: Monitor, onSelect: () => theme.set("system") },
+    { id: "theme-light", label: "Theme: Light", section: "Theme", icon: Sun, onSelect: () => theme.set("light") },
+    { id: "theme-dark", label: "Theme: Dark", section: "Theme", icon: Moon, onSelect: () => theme.set("dark") },
+  ]);
+
+  function folderCommands(g: GroupData, path: string[] = []): PaletteCommand[] {
+    if (rootGroup && g.uuid === rootGroup.uuid && path.length === 0) {
+      return g.children.flatMap((c) => folderCommands(c, [g.name]));
+    }
+    const here: PaletteCommand[] = [
+      {
+        id: `folder-${g.uuid}`,
+        label: g.name,
+        hint: path.join(" / "),
+        section: "Folders",
+        icon: Folder,
+        keywords: path.join(" "),
+        onSelect: () => selectGroup(g.uuid),
+      },
+    ];
+    for (const c of g.children) {
+      here.push(...folderCommands(c, [...path, g.name]));
+    }
+    return here;
+  }
+
+  const commandsAll = $derived([
+    ...actionCommands,
+    ...(rootGroup ? folderCommands(rootGroup) : []),
+  ]);
+
+  async function paletteSearch(q: string): Promise<PaletteCommand[]> {
+    try {
+      const results = await searchEntries(q);
+      return results.slice(0, 25).map((e) => ({
+        id: `entry-${e.uuid}`,
+        label: e.title || "(untitled)",
+        section: "Entries",
+        icon: Key,
+        hint: e.username || e.url || "",
+        onSelect: () => jumpToEntry(e.uuid),
+      }));
+    } catch {
+      return [];
+    }
+  }
 </script>
 
 <svelte:window onkeydown={onKey} />
 
-<div class="flex h-full w-full flex-col">
-  <!-- Toolbar -->
-  <div class="shrink-0 flex items-center justify-between border-b px-3 py-1.5 bg-card/40 gap-2">
-    <div class="flex items-center gap-1">
-      <Button variant="ghost" size="sm" onclick={handleSave} disabled={!appState.isDirty} title="Save (Ctrl+S)">
-        <Save class="h-4 w-4" />
-        <span class="hidden md:inline">Save</span>
-        {#if appState.isDirty}<span class="text-warning">•</span>{/if}
-      </Button>
-      <Button variant="ghost" size="sm" onclick={toggleSearch} title="Search (Ctrl+F)">
-        <Search class="h-4 w-4" />
-      </Button>
-    </div>
-
-    {#if isSearchVisible}
-      <div class="flex-1 max-w-md flex items-center gap-2">
-        <!-- svelte-ignore a11y_autofocus -->
-        <Input
-          placeholder="Search entries…"
-          value={searchQuery}
-          oninput={(e) => handleSearch(e.currentTarget.value)}
-          class="h-8"
-          autofocus
-        />
-        <Button variant="ghost" size="icon" class="h-7 w-7" onclick={toggleSearch}>
-          <X class="h-4 w-4" />
-        </Button>
-      </div>
-    {/if}
-
-    <div class="flex items-center gap-1">
-      <Button variant="ghost" size="sm" onclick={() => push("/settings")} title="Settings">
-        <Settings class="h-4 w-4" />
-      </Button>
-      <Button variant="ghost" size="sm" onclick={() => push("/about")} title="About">
-        <Info class="h-4 w-4" />
-      </Button>
-      <Button variant="ghost" size="sm" onclick={handleLogout} title="Logout">
-        <LogOut class="h-4 w-4" />
-      </Button>
-    </div>
-  </div>
-
-  <SplitPane defaultWidth={260} minWidth={200} maxWidth={500} storageKey="groupTreeWidth">
+<div class="flex h-full w-full">
+  <SplitPane defaultWidth={240} minWidth={200} maxWidth={420} storageKey="sidebarWidth">
     {#snippet left()}
-      {#if rootGroup}
-        <GroupTree
-          group={rootGroup}
-          {selectedUuid}
-          onSelectGroup={selectGroup}
-          onRefresh={() => appState.refresh()}
-          onGroupDeleted={(deleted) => {
-            if (selectedUuid === deleted && rootGroup) selectGroup(rootGroup.uuid);
-          }}
-          dbPath={appState.dbPath}
-          initialExpandedGroups={initialExpanded}
-        />
-      {/if}
+      <Sidebar
+        {rootGroup}
+        {selectedUuid}
+        onSelectGroup={selectGroup}
+        onRefresh={() => appState.refresh()}
+        onGroupDeleted={(deleted) => {
+          if (selectedUuid === deleted && rootGroup) selectGroup(rootGroup.uuid);
+        }}
+        initialExpandedGroups={initialExpanded}
+        onOpenPalette={() => (paletteOpen = true)}
+        onSave={handleSave}
+        onLogout={handleLogout}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+      />
     {/snippet}
 
     {#snippet right()}
-      {#if isDashboardView && !isSearching}
-        <Dashboard refreshTrigger={appState.refreshCounter} />
+      {#if isDashboardView}
+        <Dashboard refreshTrigger={appState.refreshCounter} onJumpToEntry={jumpToEntry} />
       {:else}
-        <EntryList
-          groupUuid={isSearching || isFavoritesView ? "" : selectedUuid}
-          searchResults={isSearching ? searchResults : isFavoritesView ? favoriteEntries : []}
-          onRefresh={onRefresh}
-          isSearching={isSearching || isFavoritesView}
-          {isFavoritesView}
-          rootGroupUuid={rootGroup?.uuid}
-          selectedGroupName={groupName}
-        />
+        <SplitPane defaultWidth={340} minWidth={260} maxWidth={520} storageKey="entryListWidth">
+          {#snippet left()}
+            <EntryList
+              groupUuid={isFavoritesView ? "" : selectedUuid}
+              searchResults={isFavoritesView ? favoriteEntries : []}
+              onRefresh={onRefresh}
+              isSearching={isFavoritesView}
+              {isFavoritesView}
+              rootGroupUuid={rootGroup?.uuid}
+              selectedGroupName={groupName}
+              {selectedEntryUuid}
+              onSelectEntry={(uuid) => (selectedEntryUuid = uuid)}
+              onEntryCreated={(uuid) => (selectedEntryUuid = uuid)}
+            />
+          {/snippet}
+          {#snippet right()}
+            {#if selectedEntryUuid}
+              {#key selectedEntryUuid}
+                <EntryEditor
+                  uuid={selectedEntryUuid}
+                  onClose={() => (selectedEntryUuid = "")}
+                  onChange={onRefresh}
+                />
+              {/key}
+            {:else}
+              <EmptyDetail />
+            {/if}
+          {/snippet}
+        </SplitPane>
       {/if}
     {/snippet}
   </SplitPane>
 </div>
+
+<CommandPalette
+  bind:open={paletteOpen}
+  commands={commandsAll}
+  onSearch={paletteSearch}
+  placeholder="Search entries, jump to folders, run commands…"
+/>
 
 <UnsavedChangesDialog
   bind:open={showUnsaved}

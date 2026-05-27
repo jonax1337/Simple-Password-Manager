@@ -4,9 +4,11 @@
   import DynamicIcon from "./DynamicIcon.svelte";
   import { ChevronRight, Plus, Edit2, Trash2, Star, LayoutPanelLeft, MoreHorizontal } from "@lucide/svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
-  import { createGroup, renameGroup, deleteGroup, type GroupData } from "$lib/tauri";
+  import { createGroup, renameGroup, deleteGroup, moveGroup, moveEntry, type GroupData } from "$lib/tauri";
   import { saveGroupTreeState } from "$lib/group-state";
-  import { findGroupByUuid } from "$lib/group-utils";
+  import { findGroupByUuid, findParentGroup, isDescendant } from "$lib/group-utils";
+  import { undoStack } from "$lib/undo-stack.svelte";
+  import { appState } from "$lib/app-state.svelte";
 
   type Props = {
     group: GroupData;
@@ -39,6 +41,8 @@
   let renameUuid = $state("");
   let renameName = $state("");
   let renameIconId = $state(48);
+
+  let dropTarget = $state<string | null>(null);
 
   $effect(() => {
     saveGroupTreeState(dbPath, expanded, selectedUuid);
@@ -79,8 +83,23 @@
 
   async function handleRename() {
     if (!renameName.trim()) return;
+    const before = findGroupByUuid(group, renameUuid);
+    const oldName = before?.name ?? "";
+    const oldIcon = before?.icon_id ?? 48;
+    const id = renameUuid;
+    const nName = renameName;
+    const nIcon = renameIconId;
     try {
-      await renameGroup(renameUuid, renameName, renameIconId);
+      await renameGroup(id, nName, nIcon);
+      undoStack.add(
+        `Rename "${oldName}" → "${nName}"`,
+        async () => {
+          await renameGroup(id, oldName, oldIcon);
+        },
+        async () => {
+          await renameGroup(id, nName, nIcon);
+        },
+      );
       toast.success("Group renamed");
       showRename = false;
       await onRefresh();
@@ -106,6 +125,101 @@
       toast.error("Failed", String(e));
     }
   }
+
+  // ---- Drag & drop ----
+  const DT_FOLDER = "application/x-pw-folder";
+  const DT_ENTRY = "application/x-pw-entry";
+
+  function onFolderDragStart(e: DragEvent, uuid: string) {
+    if (!e.dataTransfer) return;
+    e.dataTransfer.setData(DT_FOLDER, uuid);
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function onFolderDragOver(e: DragEvent, uuid: string) {
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    const types = Array.from(dt.types);
+    if (!types.includes(DT_FOLDER) && !types.includes(DT_ENTRY)) return;
+    e.preventDefault();
+    dt.dropEffect = "move";
+    if (dropTarget !== uuid) dropTarget = uuid;
+  }
+
+  function onFolderDragLeave(uuid: string) {
+    if (dropTarget === uuid) dropTarget = null;
+  }
+
+  async function onFolderDrop(e: DragEvent, targetUuid: string) {
+    e.preventDefault();
+    dropTarget = null;
+    const dt = e.dataTransfer;
+    if (!dt) return;
+
+    const folderUuid = dt.getData(DT_FOLDER);
+    const entryUuid = dt.getData(DT_ENTRY);
+
+    if (folderUuid) {
+      await handleFolderDrop(folderUuid, targetUuid);
+    } else if (entryUuid) {
+      await handleEntryDrop(entryUuid, targetUuid);
+    }
+  }
+
+  async function handleFolderDrop(draggedUuid: string, targetUuid: string) {
+    if (draggedUuid === targetUuid) return;
+    const dragged = findGroupByUuid(group, draggedUuid);
+    const target = findGroupByUuid(group, targetUuid);
+    if (!dragged || !target) return;
+    if (isDescendant(dragged, target)) {
+      toast.error("Invalid move", "Cannot move a group into its own descendant");
+      return;
+    }
+    const oldParent = findParentGroup(group, draggedUuid);
+    const oldParentUuid = oldParent?.uuid ?? group.uuid;
+    try {
+      await moveGroup(draggedUuid, targetUuid);
+      undoStack.add(
+        `Move "${dragged.name}" into "${target.name}"`,
+        async () => {
+          await moveGroup(draggedUuid, oldParentUuid);
+        },
+        async () => {
+          await moveGroup(draggedUuid, targetUuid);
+        },
+      );
+      appState.markDirty();
+      toast.success("Moved", `"${dragged.name}" → "${target.name}"`);
+      await onRefresh();
+    } catch (e) {
+      toast.error("Move failed", String(e));
+    }
+  }
+
+  async function handleEntryDrop(entryUuid: string, targetUuid: string) {
+    // EntryList provides a side-channel for the old group via custom event
+    const oldGroupUuid = window.__pwLastDraggedEntryGroup ?? null;
+    if (oldGroupUuid && oldGroupUuid === targetUuid) return;
+    try {
+      await moveEntry(entryUuid, targetUuid);
+      if (oldGroupUuid) {
+        undoStack.add(
+          `Move entry`,
+          async () => {
+            await moveEntry(entryUuid, oldGroupUuid);
+          },
+          async () => {
+            await moveEntry(entryUuid, targetUuid);
+          },
+        );
+      }
+      appState.markDirty();
+      toast.success("Entry moved");
+      await onRefresh();
+    } catch (e) {
+      toast.error("Move failed", String(e));
+    }
+  }
 </script>
 
 {#snippet folder(g: GroupData, depth: number)}
@@ -113,10 +227,19 @@
   {@const isExpanded = expanded.has(g.uuid)}
   {@const isSelected = g.uuid === selectedUuid}
   {@const iconId = g.icon_id ?? 48}
+  {@const isDropTarget = dropTarget === g.uuid}
   <div
-    class="group/row flex items-center gap-1 pr-1 py-1 rounded transition-colors hover:bg-accent/50 {isSelected
+    role="treeitem"
+    tabindex="-1"
+    aria-selected={isSelected}
+    draggable={depth > 0}
+    ondragstart={(e) => onFolderDragStart(e, g.uuid)}
+    ondragover={(e) => onFolderDragOver(e, g.uuid)}
+    ondragleave={() => onFolderDragLeave(g.uuid)}
+    ondrop={(e) => onFolderDrop(e, g.uuid)}
+    class="group/row flex items-center gap-1 pr-1 py-1 rounded transition-colors {isSelected
       ? 'bg-accent font-medium'
-      : ''}"
+      : 'hover:bg-accent/50'} {isDropTarget ? 'ring-2 ring-primary ring-inset bg-primary/10' : ''}"
     style="padding-left: {depth * 12 + 4}px;"
   >
     <button

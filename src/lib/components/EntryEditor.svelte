@@ -1,19 +1,43 @@
 <script lang="ts">
   import { Button, Input, Textarea, Label, Checkbox, Select, Tabs, TabContent, toast } from "$lib/ui";
-  import IconPicker from "$lib/components/IconPicker.svelte";
-  import PasswordStrengthMeter from "$lib/components/PasswordStrengthMeter.svelte";
-  import TotpSection from "$lib/components/TotpSection.svelte";
-  import { Eye, EyeOff, Copy, Wand2, Check, Clock, Save, ArrowLeft, Shield, Plus, Trash2 } from "@lucide/svelte";
+  import IconPicker from "./IconPicker.svelte";
+  import PasswordStrengthMeter from "./PasswordStrengthMeter.svelte";
+  import TotpSection from "./TotpSection.svelte";
+  import {
+    Eye,
+    EyeOff,
+    Copy,
+    Wand2,
+    Check,
+    Clock,
+    Save,
+    Shield,
+    Plus,
+    Trash2,
+    X,
+    Star,
+    ExternalLink,
+  } from "@lucide/svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { onMount } from "svelte";
-  import { pop } from "svelte-spa-router";
-  import { getEntry, updateEntry, generatePassword, type EntryData, type CustomField, type HistoryEntry } from "$lib/tauri";
+  import { open as openShell } from "@tauri-apps/plugin-shell";
+  import {
+    getEntry,
+    updateEntry,
+    generatePassword,
+    type EntryData,
+    type CustomField,
+    type HistoryEntry,
+  } from "$lib/tauri";
+  import { undoStack } from "$lib/undo-stack.svelte";
+  import { appState } from "$lib/app-state.svelte";
   import { validateUrl, getDefaultExpiryDate, getExpiryDate, formatTimestamp } from "$lib/entry-utils";
 
-  type Props = { params?: { uuid?: string } };
-  let { params }: Props = $props();
-
-  const uuid = $derived(params?.uuid ?? "");
+  type Props = {
+    uuid: string;
+    onClose?: () => void;
+    onChange?: () => void | Promise<void>;
+  };
+  let { uuid, onClose, onChange }: Props = $props();
 
   const empty: EntryData = {
     uuid: "",
@@ -41,25 +65,32 @@
   let copiedUsername = $state(false);
   let copiedPassword = $state(false);
   let tab = $state("general");
+  let saving = $state(false);
 
   let editingFieldIndex = $state<number | null>(null);
   let editingField = $state<CustomField | null>(null);
 
-  onMount(() => {
-    void load();
+  // Reload whenever uuid changes
+  $effect(() => {
+    void uuid;
+    loaded = false;
+    if (uuid) void load(uuid);
   });
 
-  async function load() {
+  async function load(id: string) {
     try {
-      const e = await getEntry(uuid);
+      const e = await getEntry(id);
       formData = e;
       original = { ...e };
       repeatPassword = e.password;
       hasChanges = false;
+      tab = "general";
+      editingField = null;
+      editingFieldIndex = null;
       loaded = true;
     } catch (err) {
       toast.error("Failed to load entry", String(err));
-      pop();
+      onClose?.();
     }
   }
 
@@ -120,18 +151,51 @@
       toast.error("Passwords don't match");
       return;
     }
+    saving = true;
+    const before = { ...original };
+    const after = { ...formData };
     try {
-      await updateEntry(formData);
+      await updateEntry(after);
+      undoStack.add(
+        `Edit entry "${after.title}"`,
+        async () => {
+          await updateEntry(before);
+        },
+        async () => {
+          await updateEntry(after);
+        },
+      );
       toast.success("Saved");
       hasChanges = false;
-      original = { ...formData };
+      original = { ...after };
+      appState.markDirty();
+      await onChange?.();
     } catch (e) {
       toast.error("Error", String(e));
+    } finally {
+      saving = false;
     }
   }
 
-  function handleCancel() {
-    pop();
+  async function handleRevert() {
+    formData = { ...original };
+    repeatPassword = original.password;
+    hasChanges = false;
+    urlError = null;
+  }
+
+  async function toggleFavorite() {
+    patch({ is_favorite: !formData.is_favorite });
+  }
+
+  async function openUrl() {
+    if (!formData.url) return;
+    try {
+      const full = formData.url.match(/^https?:\/\//) ? formData.url : `https://${formData.url}`;
+      await openShell(full);
+    } catch {
+      toast.error("Failed to open URL");
+    }
   }
 
   // custom fields helpers
@@ -160,7 +224,6 @@
     editingField = null;
   }
 
-  // restore from history
   function restoreHistory(h: HistoryEntry) {
     patch({
       title: h.title,
@@ -205,32 +268,57 @@
 
 <div class="flex h-full flex-col">
   {#if loaded}
+    <!-- Header -->
     <div class="shrink-0 flex items-center gap-3 border-b px-4 py-3 bg-card/30">
-      <Button variant="ghost" size="icon" onclick={handleCancel} title="Back">
-        <ArrowLeft class="h-4 w-4" />
-      </Button>
-      <IconPicker
-        value={formData.icon_id ?? 0}
-        onChange={(id) => patch({ icon_id: id })}
-      />
+      <IconPicker value={formData.icon_id ?? 0} onChange={(id) => patch({ icon_id: id })} />
       <div class="min-w-0 flex-1">
-        <h1 class="text-lg font-semibold truncate">{formData.title || "Edit Entry"}</h1>
-        <p class="text-xs text-muted-foreground">
-          {hasChanges ? "Unsaved changes" : "No changes"}
+        <h1 class="text-base font-semibold truncate" title={formData.title}>
+          {formData.title || "Untitled"}
+        </h1>
+        <p class="text-xs text-muted-foreground truncate">
+          {#if hasChanges}
+            <span class="text-warning">●</span> Unsaved changes
+          {:else}
+            Last modified {formatTimestamp(original.modified)}
+          {/if}
         </p>
       </div>
-      <Button variant="outline" onclick={handleCancel}>Cancel</Button>
-      <Button onclick={handleSave} disabled={!hasChanges || !!urlError || !passwordsMatch}>
-        <Save class="mr-2 h-4 w-4" />
-        Save
-      </Button>
+      <div class="flex items-center gap-1 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          onclick={toggleFavorite}
+          title={formData.is_favorite ? "Unfavorite" : "Favorite"}
+        >
+          {#if formData.is_favorite}
+            <Star class="h-4 w-4 text-warning fill-warning" />
+          {:else}
+            <Star class="h-4 w-4" />
+          {/if}
+        </Button>
+        {#if formData.url}
+          <Button variant="ghost" size="icon" onclick={openUrl} title="Open URL">
+            <ExternalLink class="h-4 w-4" />
+          </Button>
+        {/if}
+        {#if onClose}
+          <Button variant="ghost" size="icon" onclick={onClose} title="Close">
+            <X class="h-4 w-4" />
+          </Button>
+        {/if}
+      </div>
     </div>
 
-    <Tabs bind:value={tab} tabs={[
-      { value: "general", label: "General" },
-      { value: "advanced", label: "Advanced" },
-      { value: "history", label: "History" },
-    ]} class="flex-1 min-h-0 px-4 pt-3">
+    <!-- Tabs -->
+    <Tabs
+      bind:value={tab}
+      tabs={[
+        { value: "general", label: "General" },
+        { value: "advanced", label: "Advanced" },
+        { value: "history", label: "History" },
+      ]}
+      class="flex-1 min-h-0 px-4 pt-3"
+    >
       {#snippet children(_value: string)}
         <TabContent value="general" class="overflow-y-auto pt-2 pb-4">
           <div class="space-y-4 max-w-2xl">
@@ -240,7 +328,7 @@
             </div>
 
             <div class="grid grid-cols-[100px_1fr_auto] items-center gap-2">
-              <Label for="username">User name:</Label>
+              <Label for="username">Username:</Label>
               <Input id="username" value={formData.username} oninput={(e) => patch({ username: e.currentTarget.value })} />
               <Button
                 variant="outline"
@@ -402,7 +490,15 @@
                         </td>
                         <td class="px-3 py-2 font-mono">{field.protected ? "••••••••" : field.value || "—"}</td>
                         <td class="px-3 py-2 text-right">
-                          <Button variant="ghost" size="icon" class="h-7 w-7" onclick={(e: MouseEvent) => { e.stopPropagation(); deleteField(i); }}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            class="h-7 w-7"
+                            onclick={(e: MouseEvent) => {
+                              e.stopPropagation();
+                              deleteField(i);
+                            }}
+                          >
                             <Trash2 class="h-3.5 w-3.5 text-destructive" />
                           </Button>
                         </td>
@@ -436,12 +532,20 @@
                 <label class="flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={editingField.protected}
-                    onCheckedChange={(c) => editingField && (editingField = { ...editingField, protected: c === true })}
+                    onCheckedChange={(c) =>
+                      editingField && (editingField = { ...editingField, protected: c === true })}
                   />
                   <Shield class="h-3 w-3" /> Protected
                 </label>
                 <div class="flex gap-2 justify-end">
-                  <Button variant="outline" size="sm" onclick={() => { editingFieldIndex = null; editingField = null; }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onclick={() => {
+                      editingFieldIndex = null;
+                      editingField = null;
+                    }}
+                  >
                     Cancel
                   </Button>
                   <Button size="sm" onclick={saveField}>OK</Button>
@@ -479,7 +583,9 @@
                 <tbody>
                   {#each formData.history as h, i (i)}
                     <tr class="border-b last:border-b-0">
-                      <td class="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatTimestamp(h.timestamp)}</td>
+                      <td class="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                        {formatTimestamp(h.timestamp)}
+                      </td>
                       <td class="px-3 py-2 truncate">{h.title || "—"}</td>
                       <td class="px-3 py-2 truncate text-muted-foreground">{h.username || "—"}</td>
                       <td class="px-3 py-2 text-right">
@@ -494,6 +600,17 @@
         </TabContent>
       {/snippet}
     </Tabs>
+
+    <!-- Footer save bar -->
+    {#if hasChanges}
+      <div class="shrink-0 flex items-center justify-end gap-2 border-t px-4 py-3 bg-background">
+        <Button variant="outline" onclick={handleRevert} disabled={saving}>Revert</Button>
+        <Button onclick={handleSave} disabled={saving || !!urlError || !passwordsMatch}>
+          <Save class="mr-2 h-4 w-4" />
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+    {/if}
   {:else}
     <div class="flex-1 grid place-items-center text-sm text-muted-foreground">Loading…</div>
   {/if}

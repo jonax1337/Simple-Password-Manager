@@ -2,14 +2,12 @@
   import Router from "svelte-spa-router";
   import { Toaster, Titlebar } from "$lib/ui";
   import Shell from "./routes/Shell.svelte";
-  import EntryEditor from "./routes/EntryEditor.svelte";
   import Settings from "./routes/Settings.svelte";
   import About from "./routes/About.svelte";
   import NotFound from "./routes/NotFound.svelte";
 
   const routes = {
     "/": Shell,
-    "/entry/:uuid": EntryEditor,
     "/settings": Settings,
     "/about": About,
     "*": NotFound,

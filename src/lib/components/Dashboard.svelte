@@ -2,9 +2,18 @@
   import { Card, CardHeader, CardTitle, CardDescription, CardContent, toast } from "$lib/ui";
   import { Shield, Key, AlertTriangle, Clock, Star, TrendingUp, Copy } from "@lucide/svelte";
   import { getDashboardStats, type DashboardStats } from "$lib/tauri";
+  import { getHibpEnabled } from "$lib/storage";
+  import { appState } from "$lib/app-state.svelte";
+  import BreachedPasswordsCard from "./BreachedPasswordsCard.svelte";
+  import { onMount } from "svelte";
 
-  type Props = { refreshTrigger?: number };
-  let { refreshTrigger = 0 }: Props = $props();
+  type Props = { refreshTrigger?: number; onJumpToEntry?: (uuid: string) => void };
+  let { refreshTrigger = 0, onJumpToEntry }: Props = $props();
+
+  let hibpEnabled = $state(false);
+  onMount(() => {
+    hibpEnabled = getHibpEnabled();
+  });
 
   let stats = $state<DashboardStats | null>(null);
 
@@ -50,6 +59,15 @@
       <h1 class="text-3xl font-bold tracking-tight">Dashboard</h1>
       <p class="text-muted-foreground mt-1">Overview of your password database health and statistics</p>
     </div>
+
+    {#if hibpEnabled}
+      <BreachedPasswordsCard
+        {refreshTrigger}
+        databasePath={appState.dbPath}
+        isDirty={appState.isDirty}
+        {onJumpToEntry}
+      />
+    {/if}
 
     <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       <Card>
