@@ -1,15 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Dialog as DialogPrimitive } from "bits-ui";
-  import {
-    Button,
-    Input,
-    Label,
-    Select,
-    Switch,
-    Dialog,
-    toast,
-  } from "$lib/ui";
+  import { Button, Input, Label, Select, Switch, Dialog, toast } from "$lib/ui";
   import {
     Palette,
     Shield,
@@ -29,11 +21,16 @@
     Puzzle,
     Trash2,
     X,
+    Heart,
+    ExternalLink,
+    Check,
   } from "@lucide/svelte";
   import { theme, type ThemeMode } from "$lib/theme.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
   import { relaunch } from "@tauri-apps/plugin-process";
+  import { getVersion } from "@tauri-apps/api/app";
+  import { open as openShell } from "@tauri-apps/plugin-shell";
   import {
     enable as enableAutostart,
     disable as disableAutostart,
@@ -66,18 +63,15 @@
   } from "$lib/storage";
   import { appState } from "$lib/app-state.svelte";
 
+  type SectionId = "appearance" | "security" | "database" | "application" | "about";
+
   type Props = {
     open?: boolean;
     initialSection?: SectionId;
-    onOpenAbout?: () => void;
   };
 
-  type SectionId = "appearance" | "security" | "database" | "application" | "about";
-
-  let { open = $bindable(false), initialSection = "appearance", onOpenAbout }: Props = $props();
-
-  // svelte-ignore state_referenced_locally
-  let section = $state<SectionId>(initialSection);
+  let { open = $bindable(false), initialSection = "appearance" }: Props = $props();
+  let section = $state<SectionId>("appearance");
 
   $effect(() => {
     if (open) section = initialSection;
@@ -88,6 +82,7 @@
     { id: "security", label: "Security", icon: Shield },
     { id: "database", label: "Database", icon: Database },
     { id: "application", label: "Application", icon: SettingsIcon },
+    { id: "about", label: "About", icon: Info },
   ];
 
   // ---------- appearance ----------
@@ -135,6 +130,9 @@
   let helloBusy = $state(false);
   let helloError = $state("");
 
+  // ---------- about ----------
+  let version = $state("…");
+
   onMount(() => {
     const saved = localStorage.getItem("autoLockSeconds");
     if (saved) autoLockSeconds = saved;
@@ -148,38 +146,20 @@
     if (appState.dbPath) {
       helloIsEnrolled(appState.dbPath).then((v) => (helloEnrolled = v)).catch(() => (helloEnrolled = false));
     }
+    getVersion().then((v) => (version = v)).catch(() => (version = "unknown"));
   });
 
-  function applyTheme(v: string) {
-    theme.set(v as ThemeMode);
-  }
-
-  function applyAutoLock(v: string) {
-    autoLockSeconds = v;
-    localStorage.setItem("autoLockSeconds", v);
-  }
-
-  function applyCloseToTray(v: boolean) {
-    closeToTray = v;
-    setCloseToTray(v);
-  }
-
+  function applyTheme(v: string) { theme.set(v as ThemeMode); }
+  function applyAutoLock(v: string) { autoLockSeconds = v; localStorage.setItem("autoLockSeconds", v); }
+  function applyCloseToTray(v: boolean) { closeToTray = v; setCloseToTray(v); }
   async function applyAutostart(v: boolean) {
     try {
-      if (v) await enableAutostart();
-      else await disableAutostart();
+      if (v) await enableAutostart(); else await disableAutostart();
       autostartOn = v;
       toast.success(v ? "Autostart enabled" : "Autostart disabled");
-    } catch (e) {
-      toast.error("Failed", String(e));
-    }
+    } catch (e) { toast.error("Failed", String(e)); }
   }
-
-  function applyHibp(v: boolean) {
-    hibp = v;
-    setHibpEnabled(v);
-  }
-
+  function applyHibp(v: boolean) { hibp = v; setHibpEnabled(v); }
   function applyLive(v: boolean) {
     if (!appState.dbPath) return;
     setLiveUpdates(appState.dbPath, v);
@@ -190,12 +170,8 @@
     updateStatus = "checking";
     try {
       const u = await checkForUpdate();
-      if (u) {
-        updateStatus = "available";
-        updateVersion = u.version;
-      } else {
-        updateStatus = "uptodate";
-      }
+      if (u) { updateStatus = "available"; updateVersion = u.version; }
+      else updateStatus = "uptodate";
     } catch (e) {
       updateStatus = "error";
       updateError = e instanceof Error ? e.message : "Check failed";
@@ -206,10 +182,7 @@
     updateStatus = "installing";
     try {
       const u = await checkForUpdate();
-      if (u) {
-        await u.downloadAndInstall();
-        await relaunch();
-      }
+      if (u) { await u.downloadAndInstall(); await relaunch(); }
     } catch (e) {
       updateStatus = "error";
       updateError = e instanceof Error ? e.message : "Install failed";
@@ -217,12 +190,8 @@
   }
 
   async function installExtension() {
-    if (!extensionId.trim()) {
-      toast.error("Extension ID required");
-      return;
-    }
-    installStatus = "installing";
-    installError = "";
+    if (!extensionId.trim()) { toast.error("Extension ID required"); return; }
+    installStatus = "installing"; installError = "";
     try {
       localStorage.setItem("browserExtensionId", extensionId.trim());
       const r = await installNativeHost(extensionId.trim());
@@ -240,9 +209,7 @@
       toast.success("Removed", `${removed.length} entries removed`);
       installStatus = "idle";
       installReport = null;
-    } catch (e) {
-      toast.error("Failed", String(e));
-    }
+    } catch (e) { toast.error("Failed", String(e)); }
   }
 
   async function openYubikeyDialog() {
@@ -252,17 +219,13 @@
     try {
       yubikeyDevices = await listYubikeys();
       if (yubikeyDevices.length > 0) yubikeySelected = yubikeyDevices[0].serial_number;
-    } catch (e) {
-      yubikeyError = String(e);
-    } finally {
-      yubikeyDetecting = false;
-    }
+    } catch (e) { yubikeyError = String(e); }
+    finally { yubikeyDetecting = false; }
   }
 
   async function applyYubikey() {
     if (yubikeySelected === null) return;
-    yubikeyBusy = true;
-    yubikeyError = "";
+    yubikeyBusy = true; yubikeyError = "";
     try {
       await enableYubikey(yubikeySelected, yubikeySlot);
       if (appState.dbPath) setYubikeyHint(appState.dbPath, { serial_number: yubikeySelected, slot: yubikeySlot });
@@ -270,11 +233,8 @@
       yubikeyDialog = false;
       appState.markDirty();
       toast.success("Yubikey enrolled", "Save the database to persist this change");
-    } catch (e) {
-      yubikeyError = String(e);
-    } finally {
-      yubikeyBusy = false;
-    }
+    } catch (e) { yubikeyError = String(e); }
+    finally { yubikeyBusy = false; }
   }
 
   async function disableYk() {
@@ -286,42 +246,31 @@
       yubikeyActive = false;
       appState.markDirty();
       toast.success("Yubikey disabled");
-    } catch (e) {
-      toast.error("Failed", String(e));
-    }
+    } catch (e) { toast.error("Failed", String(e)); }
   }
 
   async function applyHello() {
     if (!appState.dbPath) return;
-    helloBusy = true;
-    helloError = "";
+    helloBusy = true; helloError = "";
     try {
       await helloStore(appState.dbPath, helloPassword);
       helloEnrolled = true;
       helloDialogOpen = false;
       helloPassword = "";
       toast.success("Windows Hello enrolled");
-    } catch (e) {
-      helloError = String(e);
-    } finally {
-      helloBusy = false;
-    }
+    } catch (e) { helloError = String(e); }
+    finally { helloBusy = false; }
   }
 
   async function clearHello() {
     if (!appState.dbPath) return;
-    const ok = await ask("Remove Windows Hello credential for this database?", {
-      kind: "warning",
-      title: "Remove credential",
-    });
+    const ok = await ask("Remove Windows Hello credential for this database?", { kind: "warning", title: "Remove credential" });
     if (!ok) return;
     try {
       await helloClear(appState.dbPath);
       helloEnrolled = false;
       toast.success("Credential removed");
-    } catch (e) {
-      toast.error("Failed", String(e));
-    }
+    } catch (e) { toast.error("Failed", String(e)); }
   }
 </script>
 
@@ -331,13 +280,13 @@
       class="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
     />
     <DialogPrimitive.Content
-      class="fixed top-[50%] left-[50%] z-50 grid w-full max-w-[860px] h-[min(640px,80vh)] translate-x-[-50%] translate-y-[-50%] grid-cols-[200px_1fr] overflow-hidden rounded-xl border bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
+      class="fixed top-[50%] left-[50%] z-50 w-[min(900px,92vw)] h-[min(640px,82vh)] translate-x-[-50%] translate-y-[-50%] overflow-hidden rounded-xl border bg-background shadow-2xl outline-none flex data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
     >
       <DialogPrimitive.Title class="sr-only">Settings</DialogPrimitive.Title>
       <DialogPrimitive.Description class="sr-only">Application settings</DialogPrimitive.Description>
 
-      <!-- Internal sidebar -->
-      <aside class="bg-sidebar border-r flex flex-col">
+      <!-- Nav rail -->
+      <aside class="w-[200px] shrink-0 bg-sidebar border-r flex flex-col">
         <div class="px-4 pt-4 pb-3 text-sm font-semibold tracking-tight">Settings</div>
         <nav class="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto">
           {#each sections as s (s.id)}
@@ -354,22 +303,10 @@
             </button>
           {/each}
         </nav>
-        {#if onOpenAbout}
-          <div class="p-2 border-t">
-            <button
-              type="button"
-              onclick={onOpenAbout}
-              class="w-full flex items-center gap-2.5 rounded-md px-2.5 h-8 text-sm text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
-            >
-              <Info class="size-4" />
-              <span>About</span>
-            </button>
-          </div>
-        {/if}
       </aside>
 
-      <!-- Right pane -->
-      <div class="relative flex flex-col min-h-0">
+      <!-- Content pane -->
+      <div class="flex-1 min-w-0 flex flex-col">
         <div class="shrink-0 flex items-center justify-between border-b px-6 py-3">
           <h2 class="text-base font-semibold">
             {sections.find((s) => s.id === section)?.label ?? "Settings"}
@@ -382,9 +319,9 @@
           </DialogPrimitive.Close>
         </div>
 
-        <div class="flex-1 overflow-y-auto px-6 py-4">
+        <div class="flex-1 overflow-y-auto px-6 py-5">
           {#if section === "appearance"}
-            <div class="space-y-6">
+            <div class="space-y-6 max-w-md">
               <div class="space-y-1.5">
                 <h3 class="text-sm font-medium">Theme</h3>
                 <p class="text-xs text-muted-foreground">Choose how the app looks.</p>
@@ -403,7 +340,7 @@
               </div>
             </div>
           {:else if section === "security"}
-            <div class="space-y-8">
+            <div class="space-y-8 max-w-md">
               <div class="space-y-1.5">
                 <h3 class="text-sm font-medium flex items-center gap-2">
                   <Lock class="h-4 w-4" /> Auto-lock
@@ -430,8 +367,7 @@
                   <ShieldAlert class="h-4 w-4" /> Breach detection (HIBP)
                 </h3>
                 <p class="text-xs text-muted-foreground">
-                  Check passwords against haveibeenpwned.com using k-anonymity. No plaintext leaves your
-                  machine.
+                  Check passwords against haveibeenpwned.com using k-anonymity. No plaintext leaves your machine.
                 </p>
                 <label class="flex items-center gap-2 pt-2">
                   <Switch checked={hibp} onCheckedChange={applyHibp} />
@@ -443,9 +379,7 @@
                 <h3 class="text-sm font-medium flex items-center gap-2">
                   <KeyRound class="h-4 w-4" /> Yubikey
                 </h3>
-                <p class="text-xs text-muted-foreground">
-                  Add an HMAC-SHA1 challenge-response factor for this database.
-                </p>
+                <p class="text-xs text-muted-foreground">Add an HMAC-SHA1 challenge-response factor for this database.</p>
                 <div class="flex items-center gap-3 pt-2">
                   <span class="text-sm {yubikeyActive ? 'text-success' : 'text-muted-foreground'}">
                     {yubikeyActive ? "Enabled" : "Not enrolled"}
@@ -463,9 +397,7 @@
                   <h3 class="text-sm font-medium flex items-center gap-2">
                     <Fingerprint class="h-4 w-4" /> Windows Hello
                   </h3>
-                  <p class="text-xs text-muted-foreground">
-                    Seal the master password behind Windows Hello for quick unlock.
-                  </p>
+                  <p class="text-xs text-muted-foreground">Seal the master password behind Windows Hello for quick unlock.</p>
                   <div class="flex items-center gap-3 pt-2">
                     <span class="text-sm {helloEnrolled ? 'text-success' : 'text-muted-foreground'}">
                       {helloEnrolled ? "Credential stored" : "Not enrolled"}
@@ -480,14 +412,12 @@
               {/if}
             </div>
           {:else if section === "database"}
-            <div class="space-y-8">
+            <div class="space-y-8 max-w-md">
               <div class="space-y-1.5">
                 <h3 class="text-sm font-medium flex items-center gap-2">
                   <RefreshCw class="h-4 w-4" /> Live updates
                 </h3>
-                <p class="text-xs text-muted-foreground">
-                  Auto-merge changes from disk every few seconds.
-                </p>
+                <p class="text-xs text-muted-foreground">Auto-merge changes from disk every few seconds.</p>
                 <label class="flex items-center gap-2 pt-2">
                   <Switch checked={liveUpdatesEnabled} onCheckedChange={applyLive} />
                   <span class="text-sm">{liveUpdatesEnabled ? "Enabled" : "Disabled"}</span>
@@ -498,7 +428,7 @@
               </div>
             </div>
           {:else if section === "application"}
-            <div class="space-y-8">
+            <div class="space-y-8 max-w-md">
               <div class="space-y-1.5">
                 <h3 class="text-sm font-medium">Close behavior</h3>
                 <p class="text-xs text-muted-foreground">What happens when you close the window.</p>
@@ -530,12 +460,7 @@
                   {#if updateStatus === "available"}
                     <Button size="sm" onclick={install}>Install &amp; restart</Button>
                   {:else}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onclick={check}
-                      disabled={updateStatus === "checking" || updateStatus === "installing"}
-                    >
+                    <Button size="sm" variant="outline" onclick={check} disabled={updateStatus === "checking" || updateStatus === "installing"}>
                       {updateStatus === "checking" ? "Checking…" : "Check for updates"}
                     </Button>
                   {/if}
@@ -546,13 +471,9 @@
                 <h3 class="text-sm font-medium flex items-center gap-2">
                   <Puzzle class="h-4 w-4" /> Browser extension
                 </h3>
-                <p class="text-xs text-muted-foreground">
-                  Connect a browser extension via the native messaging host.
-                </p>
+                <p class="text-xs text-muted-foreground">Connect a browser extension via the native messaging host.</p>
                 {#if browsers && browsers.length > 0}
-                  <p class="text-xs text-muted-foreground">
-                    Detected: {browsers.map((b) => b.label).join(", ")}
-                  </p>
+                  <p class="text-xs text-muted-foreground">Detected: {browsers.map((b) => b.label).join(", ")}</p>
                 {/if}
                 <div class="pt-2 space-y-2">
                   <Label for="ext-id">Extension ID</Label>
@@ -579,6 +500,27 @@
                 {#if installError}
                   <p class="text-xs text-destructive">{installError}</p>
                 {/if}
+              </div>
+            </div>
+          {:else if section === "about"}
+            <div class="flex flex-col items-center text-center space-y-4 max-w-sm mx-auto pt-4">
+              <img src="/app-icon.png" alt="App icon" class="size-20 drop-shadow-md" />
+              <div>
+                <h2 class="text-xl font-semibold tracking-tight">Simple Password Manager</h2>
+                <p class="text-xs text-muted-foreground mt-1">Version {version}</p>
+              </div>
+              <p class="text-sm text-muted-foreground">
+                A secure and modern password manager built with the proven KeePass database format.
+              </p>
+              <Button variant="outline" class="w-full" onclick={() => openShell("https://github.com/jonax1337/Simple-Password-Manager")}>
+                <ExternalLink class="size-3.5" />
+                View on GitHub
+              </Button>
+              <div class="pt-2 text-[11px] text-muted-foreground space-y-0.5">
+                <p class="flex items-center justify-center gap-1">
+                  Made with <Heart class="h-3 w-3 fill-current text-destructive" /> by Jonas Laux
+                </p>
+                <p>Open Source · MIT License</p>
               </div>
             </div>
           {/if}
@@ -608,10 +550,7 @@
     </div>
     <div class="space-y-2">
       <Label>Slot</Label>
-      <Select
-        items={[{ value: "1", label: "Slot 1" }, { value: "2", label: "Slot 2" }]}
-        bind:value={yubikeySlot}
-      />
+      <Select items={[{ value: "1", label: "Slot 1" }, { value: "2", label: "Slot 2" }]} bind:value={yubikeySlot} />
     </div>
   {/if}
   {#if yubikeyError}
@@ -639,9 +578,7 @@
     <p class="text-xs text-destructive">{helloError}</p>
   {/if}
   {#snippet footer()}
-    <Button variant="outline" onclick={() => { helloDialogOpen = false; helloPassword = ""; }} disabled={helloBusy}>
-      Cancel
-    </Button>
+    <Button variant="outline" onclick={() => { helloDialogOpen = false; helloPassword = ""; }} disabled={helloBusy}>Cancel</Button>
     <Button onclick={applyHello} disabled={helloBusy || !helloPassword}>
       {helloBusy ? "Storing…" : "Store"}
     </Button>

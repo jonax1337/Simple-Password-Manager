@@ -395,6 +395,7 @@
         }}
         initialExpandedGroups={initialExpanded}
         onOpenSettings={() => (settingsOpen = true)}
+        onOpenAbout={() => (aboutOpen = true)}
         onSave={handleSave}
         onLogout={handleLogout}
       />
@@ -445,7 +446,7 @@
   placeholder="Search entries, jump to folders, run commands…"
 />
 
-<SettingsDialog bind:open={settingsOpen} onOpenAbout={() => { settingsOpen = false; aboutOpen = true; }} />
+<SettingsDialog bind:open={settingsOpen} />
 <AboutDialog bind:open={aboutOpen} />
 
 <UnsavedChangesDialog
