@@ -20,8 +20,13 @@
 
 use sha1::{Digest, Sha1};
 
+// Only the Windows impl uses these; on other platforms the non-test build
+// has no references (the unit tests do exercise target_for cross-platform,
+// but `cargo clippy` without --all-targets doesn't see test code).
+#[cfg_attr(not(windows), allow(dead_code))]
 const TARGET_PREFIX: &str = "digital.laux.simple_password_manager:hello:";
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn target_for(db_path: &str) -> String {
     let mut hasher = Sha1::new();
     hasher.update(db_path.as_bytes());
@@ -213,7 +218,12 @@ mod imp {
 
 // ----------------------------- Stubs -----------------------------
 
+// The non-Windows command bodies return the error directly without ever
+// calling into imp::, but we keep the stub module so the platform-gated
+// import paths in this file resolve uniformly. All items here are
+// intentionally unused on non-Windows builds.
 #[cfg(not(windows))]
+#[allow(dead_code)]
 mod imp {
     pub async fn available() -> Result<bool, String> {
         Ok(false)
