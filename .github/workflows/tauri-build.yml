@@ -23,8 +23,12 @@ jobs:
             platform: windows
           - os: ubuntu-latest
             platform: linux
-          - os: macos-latest
-            platform: macos
+          # macos-latest is intentionally excluded — the `challenge_response`
+          # crate (Yubikey support) doesn't compile against the version of
+          # `nusb` that macOS resolves to (`DeviceInfo::busnum` is missing).
+          # We don't ship macOS bundles from this workflow anyway; the
+          # release workflow stopped doing it once bundle_dmg.sh broke
+          # upstream. Re-add when challenge_response or nusb fixes things.
     
     runs-on: ${{ matrix.os }}
 
