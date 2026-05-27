@@ -55,7 +55,7 @@
   const dbName = $derived(appState.dbPath ? appState.dbPath.split(/[\\/]/).pop() : "");
 </script>
 
-<aside class="flex flex-col h-full bg-card/40 min-h-0">
+<aside class="flex flex-col h-full bg-sidebar min-h-0">
   <!-- Folders -->
   <div class="flex-1 min-h-0 overflow-hidden">
     {#if rootGroup}

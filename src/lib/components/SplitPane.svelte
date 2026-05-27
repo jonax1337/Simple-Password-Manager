@@ -21,6 +21,7 @@
 
   let width = $state(loadInitial());
   let dragging = $state(false);
+  let container: HTMLDivElement | null = $state(null);
 
   function loadInitial(): number {
     if (!storageKey || typeof window === "undefined") return defaultWidth;
@@ -43,9 +44,10 @@
   }
 
   function onPointerMove(e: PointerEvent) {
-    if (!dragging) return;
-    const next = Math.max(minWidth, Math.min(maxWidth, e.clientX));
-    width = next;
+    if (!dragging || !container) return;
+    const rect = container.getBoundingClientRect();
+    const local = e.clientX - rect.left;
+    width = Math.max(minWidth, Math.min(maxWidth, local));
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -56,19 +58,24 @@
   }
 </script>
 
-<div class="flex h-full min-h-0 flex-1 overflow-hidden">
-  <div class="shrink-0 h-full overflow-hidden border-r bg-card/30" style="width: {width}px;">
+<div bind:this={container} class="flex h-full min-h-0 flex-1 overflow-hidden">
+  <div class="shrink-0 h-full overflow-hidden" style="width: {width}px;">
     {@render left()}
   </div>
   <div
-    class="w-1 cursor-col-resize bg-transparent hover:bg-primary/30 transition-colors {dragging ? 'bg-primary/40' : ''}"
+    class="relative w-px shrink-0 bg-border group/sep"
     role="separator"
     aria-orientation="vertical"
     tabindex="-1"
-    onpointerdown={onPointerDown}
-    onpointermove={onPointerMove}
-    onpointerup={onPointerUp}
-  ></div>
+  >
+    <div
+      class="absolute inset-y-0 -left-1 -right-1 cursor-col-resize hover:bg-primary/20 transition-colors {dragging ? 'bg-primary/30' : ''}"
+      onpointerdown={onPointerDown}
+      onpointermove={onPointerMove}
+      onpointerup={onPointerUp}
+      role="presentation"
+    ></div>
+  </div>
   <div class="flex-1 min-w-0 h-full overflow-hidden">
     {@render right()}
   </div>

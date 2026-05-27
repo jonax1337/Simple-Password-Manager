@@ -293,7 +293,7 @@
   const allChecked = $derived(filtered.length > 0 && selection.size === filtered.length);
 </script>
 
-<div class="flex h-full flex-col bg-card/20">
+<div class="flex h-full flex-col bg-list">
   <!-- Header -->
   <div class="shrink-0 border-b">
     <div class="flex items-center justify-between px-3 pt-3 pb-2 gap-2">
@@ -426,11 +426,11 @@
               ondragend={() => {
                 window.__pwLastDraggedEntryGroup = null;
               }}
-              class="group/row w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors cursor-pointer {isSelected
-                ? 'bg-primary/10'
+              class="group/row w-full flex items-center gap-3 mx-2 my-0.5 px-2 py-2 rounded-md text-left transition-colors cursor-pointer {isSelected
+                ? 'bg-primary text-primary-foreground'
                 : isChecked
-                  ? 'bg-accent/40'
-                  : 'hover:bg-accent/30'}"
+                  ? 'bg-accent'
+                  : 'hover:bg-accent/60'}"
               onclick={() => onSelectEntry(entry.uuid)}
               onkeydown={(e: KeyboardEvent) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -459,17 +459,23 @@
                 </span>
               </span>
 
-              <DynamicIcon iconId={iconId} class="h-4 w-4 text-muted-foreground shrink-0" />
+              <span
+                class="grid place-items-center size-9 rounded-lg shrink-0 {isSelected
+                  ? 'bg-primary-foreground/20 text-primary-foreground'
+                  : 'bg-muted text-muted-foreground'}"
+              >
+                <DynamicIcon iconId={iconId} class="size-4" />
+              </span>
 
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-1.5">
                   <span class="text-sm font-medium truncate">{entry.title || "(untitled)"}</span>
                   {#if entry.is_favorite}
-                    <Star class="h-3 w-3 text-warning fill-warning shrink-0" />
+                    <Star class="h-3 w-3 {isSelected ? 'text-primary-foreground' : 'text-warning fill-warning'} shrink-0" />
                   {/if}
                 </div>
                 {#if entry.username}
-                  <div class="text-xs text-muted-foreground truncate">{entry.username}</div>
+                  <div class="text-xs truncate {isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}">{entry.username}</div>
                 {/if}
               </div>
 
@@ -478,7 +484,7 @@
               >
                 <button
                   type="button"
-                  class="size-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
+                  class="size-7 inline-flex items-center justify-center rounded {isSelected ? 'hover:bg-primary-foreground/20 text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}"
                   title="Copy password"
                   disabled={!entry.password}
                   onclick={(e: MouseEvent) => {
@@ -492,7 +498,7 @@
                   {#snippet trigger()}
                     <button
                       type="button"
-                      class="size-7 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
+                      class="size-7 inline-flex items-center justify-center rounded {isSelected ? 'hover:bg-primary-foreground/20 text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}"
                       aria-label="Entry actions"
                       onclick={(e: MouseEvent) => e.stopPropagation()}
                     >
