@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Button, Input, Label, toast } from "$lib/ui";
-  import { KeyRound, Fingerprint, Lock } from "@lucide/svelte";
+  import { KeyRound, Fingerprint } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { openDatabase, helloAvailable, helloIsEnrolled, helloRetrieve } from "$lib/tauri";
   import { addRecentDatabase, getYubikeyHint } from "$lib/storage";
@@ -130,23 +130,11 @@
   databasePath={lastDatabasePath}
 />
 
-<div class="relative flex h-full w-full items-center justify-center overflow-hidden bg-background">
-  <div
-    class="pointer-events-none absolute inset-0 -z-10"
-    aria-hidden="true"
-    style="
-      background:
-        radial-gradient(700px 500px at 50% 0%, color-mix(in oklch, var(--color-primary) 14%, transparent), transparent 70%),
-        radial-gradient(600px 400px at 50% 100%, color-mix(in oklch, var(--color-primary) 6%, transparent), transparent 70%);
-    "
-  ></div>
-
+<div class="flex h-full w-full items-center justify-center overflow-hidden bg-background">
   <div class="w-full max-w-[380px] mx-6">
-    <div class="rounded-2xl border bg-card/95 backdrop-blur px-7 pt-7 pb-6 shadow-xl shadow-foreground/5">
+    <div class="rounded-2xl border bg-card px-7 pt-7 pb-6">
       <div class="flex flex-col items-center text-center space-y-3">
-        <div class="grid place-items-center size-14 rounded-2xl bg-primary/10 text-primary ring-soft">
-          <Lock class="size-7" />
-        </div>
+        <img src="/app-icon.png" alt="" aria-hidden="true" class="size-14 object-contain" />
         <div>
           <h2 class="text-[18px] font-semibold tracking-tight">{dbName}</h2>
           <p class="text-[11px] text-muted-foreground truncate max-w-[300px]" title={lastDatabasePath}>

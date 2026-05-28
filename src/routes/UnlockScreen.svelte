@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Button, Input, Label, toast } from "$lib/ui";
-  import { FolderOpen, Plus, KeyRound, Fingerprint, Lock } from "@lucide/svelte";
+  import { FolderOpen, Plus, KeyRound, Fingerprint } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openDatabase, helloAvailable, helloIsEnrolled, helloRetrieve } from "$lib/tauri";
@@ -143,29 +143,11 @@
 />
 
 <!-- Two-panel unlock — branding on the left, form on the right (collapses on narrow). -->
-<div class="relative flex h-full w-full overflow-hidden bg-background">
-  <!-- Backdrop atmosphere -->
-  <div
-    class="pointer-events-none absolute inset-0 -z-10"
-    aria-hidden="true"
-    style="
-      background:
-        radial-gradient(900px 600px at 10% 10%, color-mix(in oklch, var(--color-primary) 14%, transparent), transparent 60%),
-        radial-gradient(800px 500px at 90% 100%, color-mix(in oklch, var(--color-primary) 8%, transparent), transparent 60%);
-    "
-  ></div>
-
+<div class="flex h-full w-full overflow-hidden bg-background">
   <!-- Brand panel -->
-  <aside class="hidden lg:flex w-[44%] max-w-[520px] flex-col justify-between p-12 border-r border-border/60 bg-sidebar/60 backdrop-blur-sm">
-    <div class="flex items-center gap-2.5">
-      <div class="grid place-items-center size-7 rounded-md bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-bold text-xs shadow-sm">P</div>
-      <span class="text-[13px] font-semibold tracking-tight">Simple Password Manager</span>
-    </div>
-
+  <aside class="hidden lg:flex w-[44%] max-w-[520px] flex-col justify-center p-12 border-r border-border/60 bg-sidebar">
     <div class="space-y-6">
-      <div class="grid place-items-center size-20 rounded-3xl bg-primary/10 text-primary ring-soft">
-        <Lock class="size-10" />
-      </div>
+      <img src="/app-icon.png" alt="" aria-hidden="true" class="size-20 object-contain" />
       <div class="space-y-3">
         <h1 class="text-[34px] font-semibold tracking-tight leading-[1.1]">
           Your vault,<br/>locked &amp; loaded.
@@ -175,24 +157,18 @@
           and keep your accounts in order — all stored locally on your machine.
         </p>
       </div>
-    </div>
-
-    <div class="text-[11px] text-muted-foreground/80 space-y-1">
-      <p class="flex items-center gap-1.5">
-        <span class="size-1.5 rounded-full bg-success/70"></span>
-        End-to-end encrypted — your master password never leaves this device.
-      </p>
+      <div class="text-[11px] text-muted-foreground/80 pt-4 border-t border-border/40">
+        <p class="flex items-center gap-1.5">
+          <span class="size-1.5 rounded-full bg-success/70"></span>
+          End-to-end encrypted — your master password never leaves this device.
+        </p>
+      </div>
     </div>
   </aside>
 
   <!-- Form panel -->
   <main class="flex-1 grid place-items-center px-6 py-10 overflow-y-auto">
     <div class="w-full max-w-[400px] space-y-7">
-      <div class="lg:hidden flex items-center gap-2.5 justify-center">
-        <div class="grid place-items-center size-7 rounded-md bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-bold text-xs shadow-sm">P</div>
-        <span class="text-[13px] font-semibold tracking-tight">Simple Password Manager</span>
-      </div>
-
       <div class="space-y-2">
         <h2 class="text-[22px] font-semibold tracking-tight">Welcome back</h2>
         <p class="text-[13px] text-muted-foreground">

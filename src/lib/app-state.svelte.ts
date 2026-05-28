@@ -9,6 +9,8 @@ class AppState {
   initialFilePath = $state<string | null>(null);
   isDirty = $state<boolean>(false);
   refreshCounter = $state<number>(0);
+  // Increments on every markDirty() so debounced auto-save can re-arm.
+  dirtyVersion = $state<number>(0);
 
   setPhase(p: Phase) {
     this.phase = p;
@@ -21,6 +23,7 @@ class AppState {
   }
   markDirty() {
     this.isDirty = true;
+    this.dirtyVersion += 1;
   }
   markClean() {
     this.isDirty = false;

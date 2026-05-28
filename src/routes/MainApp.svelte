@@ -152,6 +152,30 @@
     return () => clearInterval(iv);
   });
 
+  // Auto-save: debounced 1.5s after the last mutation. Triggered via
+  // appState.dirtyVersion (increments on every markDirty) so repeated edits
+  // keep pushing the deadline out.
+  const AUTO_SAVE_DELAY_MS = 1500;
+  $effect(() => {
+    void appState.dirtyVersion;
+    if (!appState.isDirty || !appState.dbPath) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const changed = await checkDatabaseChanges();
+        if (changed) {
+          // Disk diverged — defer to the conflict dialog rather than overwriting silently.
+          showConflict = true;
+          return;
+        }
+        await saveDatabase();
+        appState.markClean();
+      } catch (e) {
+        toast.error("Auto-save failed", String(e));
+      }
+    }, AUTO_SAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
+
   async function selectGroup(uuid: string) {
     selectedUuid = uuid;
     selectedEntryUuid = "";
@@ -276,10 +300,7 @@
   function onKey(e: KeyboardEvent) {
     const isMac = /Mac|iPhone|iPad/i.test(navigator.platform);
     const mod = isMac ? e.metaKey : e.ctrlKey;
-    if (mod && e.key.toLowerCase() === "s") {
-      e.preventDefault();
-      void handleSave();
-    } else if (mod && e.key.toLowerCase() === "k") {
+    if (mod && e.key.toLowerCase() === "k") {
       if (paletteOpen) return;
       if (isEditable(e.target)) return;
       e.preventDefault();
@@ -321,7 +342,6 @@
     { id: "go-home", label: "Go to Home", section: "Navigate", icon: Home, keywords: "home dashboard", onSelect: () => selectGroup("_dashboard") },
     { id: "go-all", label: "Go to All Items", section: "Navigate", icon: KeyRound, onSelect: () => selectGroup("_all") },
     { id: "go-favorites", label: "Go to Favorites", section: "Navigate", icon: Star, onSelect: () => selectGroup("_favorites") },
-    { id: "act-save", label: "Save database", section: "Actions", icon: Save, hint: "Ctrl S", onSelect: handleSave },
     { id: "act-undo", label: "Undo last action", section: "Actions", icon: Undo2, hint: "Ctrl Z", onSelect: handleUndo },
     { id: "act-redo", label: "Redo last action", section: "Actions", icon: Redo2, hint: "Ctrl Y", onSelect: handleRedo },
     { id: "act-settings", label: "Open Settings", section: "Actions", icon: SettingsIcon, onSelect: () => (settingsOpen = true) },
@@ -395,8 +415,6 @@
         }}
         initialExpandedGroups={initialExpanded}
         onOpenSettings={() => (settingsOpen = true)}
-        onOpenAbout={() => (aboutOpen = true)}
-        onSave={handleSave}
         onLogout={handleLogout}
       />
     {/snippet}

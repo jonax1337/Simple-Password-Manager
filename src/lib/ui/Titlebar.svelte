@@ -31,13 +31,8 @@
   class="titlebar select-none flex items-center h-9 shrink-0 bg-sidebar border-b border-border/60 text-foreground"
 >
   {#if showAppMark}
-    <div data-tauri-drag-region class="flex items-center gap-2 pl-3 pr-3">
-      <div
-        class="grid place-items-center size-[18px] rounded-[5px] bg-gradient-to-br from-primary to-primary/70 text-primary-foreground font-bold text-[10px] shadow-sm"
-        aria-hidden="true"
-      >
-        P
-      </div>
+    <div data-tauri-drag-region class="flex items-center pl-3 pr-3">
+      <img src="/app-icon.png" alt="" aria-hidden="true" class="size-[18px] object-contain" />
     </div>
   {:else}
     <div data-tauri-drag-region class="w-3"></div>
