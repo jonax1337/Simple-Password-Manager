@@ -55,8 +55,6 @@
   import {
     getHibpEnabled,
     setHibpEnabled,
-    getLiveUpdates,
-    setLiveUpdates,
     getCloseToTray,
     setCloseToTray,
     setYubikeyHint,
@@ -95,9 +93,6 @@
   // ---------- security ----------
   let autoLockSeconds = $state("0");
   let hibp = $state(false);
-
-  // ---------- database ----------
-  let liveUpdatesEnabled = $state(false);
 
   // ---------- application ----------
   let closeToTray = $state(true);
@@ -138,7 +133,6 @@
     if (saved) autoLockSeconds = saved;
     closeToTray = getCloseToTray();
     hibp = getHibpEnabled();
-    if (appState.dbPath) liveUpdatesEnabled = getLiveUpdates(appState.dbPath);
     isAutostartEnabled().then((v) => (autostartOn = v)).catch(() => (autostartOn = false));
     detectBrowsers().then((b) => (browsers = b)).catch(() => (browsers = []));
     yubikeyEnabledForOpenDb().then((v) => (yubikeyActive = v)).catch(() => (yubikeyActive = false));
@@ -160,11 +154,6 @@
     } catch (e) { toast.error("Failed", String(e)); }
   }
   function applyHibp(v: boolean) { hibp = v; setHibpEnabled(v); }
-  function applyLive(v: boolean) {
-    if (!appState.dbPath) return;
-    setLiveUpdates(appState.dbPath, v);
-    liveUpdatesEnabled = v;
-  }
 
   async function check() {
     updateStatus = "checking";
@@ -415,15 +404,14 @@
             <div class="space-y-8 max-w-md">
               <div class="space-y-1.5">
                 <h3 class="text-sm font-medium flex items-center gap-2">
-                  <RefreshCw class="h-4 w-4" /> Live updates
+                  <RefreshCw class="h-4 w-4" /> Sync
                 </h3>
-                <p class="text-xs text-muted-foreground">Auto-merge changes from disk every few seconds.</p>
-                <label class="flex items-center gap-2 pt-2">
-                  <Switch checked={liveUpdatesEnabled} onCheckedChange={applyLive} />
-                  <span class="text-sm">{liveUpdatesEnabled ? "Enabled" : "Disabled"}</span>
-                </label>
+                <p class="text-xs text-muted-foreground">
+                  Changes are saved automatically to disk. If the file is modified by another
+                  app, the new version is merged in silently — no action needed.
+                </p>
                 {#if appState.dbPath}
-                  <p class="text-xs text-muted-foreground mt-2 break-all font-mono">{appState.dbPath}</p>
+                  <p class="text-xs text-muted-foreground mt-3 break-all font-mono">{appState.dbPath}</p>
                 {/if}
               </div>
             </div>

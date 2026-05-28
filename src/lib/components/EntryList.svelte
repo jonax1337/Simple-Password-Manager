@@ -429,7 +429,7 @@
               ondragend={() => {
                 window.__pwLastDraggedEntryGroup = null;
               }}
-              class="group/row w-full flex items-center gap-3 px-2 py-2 my-0.5 rounded-lg text-left transition-colors cursor-pointer {isSelected
+              class="group/row w-full flex items-center gap-3 px-2 py-2 my-0.5 rounded-lg text-left transition-colors cursor-pointer active:cursor-grabbing {isSelected
                 ? 'bg-selected text-selected-foreground'
                 : isChecked
                   ? 'bg-accent/70'

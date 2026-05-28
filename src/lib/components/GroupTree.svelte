@@ -235,10 +235,10 @@
     ondragover={(e) => onFolderDragOver(e, g.uuid)}
     ondragleave={() => onFolderDragLeave(g.uuid)}
     ondrop={(e) => onFolderDrop(e, g.uuid)}
-    class="group/row flex items-center gap-1 pr-1.5 h-7 rounded-md transition-colors {isSelected
+    class="group/row flex items-center gap-1 pr-1.5 h-7 rounded-md transition-colors cursor-pointer active:cursor-grabbing {isSelected
       ? 'bg-selected text-selected-foreground'
       : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground'} {isDropTarget
-      ? 'ring-2 ring-primary/60 ring-inset'
+      ? 'ring-2 ring-primary ring-inset bg-primary/10'
       : ''}"
     style="padding-left: {depth * 14 + 4}px;"
   >

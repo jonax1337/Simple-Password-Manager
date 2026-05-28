@@ -23,7 +23,7 @@
     type GroupData,
     type EntryData,
   } from "$lib/tauri";
-  import { getLiveUpdates, getCloseToTray } from "$lib/storage";
+  import { getCloseToTray } from "$lib/storage";
   import { appState } from "$lib/app-state.svelte";
   import { undoStack } from "$lib/undo-stack.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -70,7 +70,6 @@
   let showUnsaved = $state(false);
   let closeAction = $state<"logout" | "window" | null>(null);
   let showConflict = $state(false);
-  let liveUpdatesEnabled = $state(false);
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
   let aboutOpen = $state(false);
@@ -104,7 +103,6 @@
     if (appState.dbPath) {
       const state = loadGroupTreeState(appState.dbPath, groups.uuid, groups);
       initialExpanded = new Set(state.expandedGroups);
-      liveUpdatesEnabled = getLiveUpdates(appState.dbPath);
     }
     selectedUuid = "_dashboard";
   }
@@ -133,48 +131,70 @@
     }
   });
 
+  // Background poll for *external* DB changes. Always on (no opt-in setting).
+  // If the file on disk diverged, merge it in silently — KeePass merges by UUID
+  // and is conflict-free in practice. We don't even toast; the UI just refreshes.
   $effect(() => {
-    if (!liveUpdatesEnabled || !appState.dbPath || appState.isDirty) return;
+    if (!appState.dbPath) return;
     const iv = setInterval(async () => {
+      if (appState.isDirty) return; // let the auto-save path handle it instead
       try {
         const changed = await checkDatabaseChanges();
         if (changed) {
           await mergeDatabase();
           appState.refresh();
-          await saveDatabase();
-          appState.markClean();
-          toast.success("Auto-sync", "Database synchronized automatically");
         }
       } catch (e) {
-        console.error("Live update check failed", e);
+        console.error("Remote check failed", e);
       }
-    }, 5000);
+    }, 3000);
     return () => clearInterval(iv);
   });
 
-  // Auto-save: debounced 1.5s after the last mutation. Triggered via
-  // appState.dirtyVersion (increments on every markDirty) so repeated edits
-  // keep pushing the deadline out.
-  const AUTO_SAVE_DELAY_MS = 1500;
+  // Instant auto-save: whenever something mutated (dirtyVersion ticked), flush
+  // to disk on the next microtask. A tiny coalescing window keeps bursts of
+  // edits from issuing a save per keystroke, but it never blocks: 60ms is
+  // imperceptible to humans.
+  //
+  // On disk-changed: merge first, then save. Only surface the conflict dialog
+  // if the merge itself throws — that's the only real conflict KeePass exposes.
+  let savePending = false;
+  let saveQueued = false;
   $effect(() => {
     void appState.dirtyVersion;
     if (!appState.isDirty || !appState.dbPath) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        const changed = await checkDatabaseChanges();
-        if (changed) {
-          // Disk diverged — defer to the conflict dialog rather than overwriting silently.
+    const timer = window.setTimeout(() => void runSave(), 60);
+    return () => clearTimeout(timer);
+  });
+
+  async function runSave() {
+    if (savePending) {
+      saveQueued = true;
+      return;
+    }
+    savePending = true;
+    try {
+      if (await checkDatabaseChanges()) {
+        try {
+          await mergeDatabase();
+          appState.refresh();
+        } catch {
           showConflict = true;
           return;
         }
-        await saveDatabase();
-        appState.markClean();
-      } catch (e) {
-        toast.error("Auto-save failed", String(e));
       }
-    }, AUTO_SAVE_DELAY_MS);
-    return () => clearTimeout(timer);
-  });
+      await saveDatabase();
+      appState.markClean();
+    } catch (e) {
+      toast.error("Auto-save failed", String(e));
+    } finally {
+      savePending = false;
+      if (saveQueued) {
+        saveQueued = false;
+        if (appState.isDirty) void runSave();
+      }
+    }
+  }
 
   async function selectGroup(uuid: string) {
     selectedUuid = uuid;
