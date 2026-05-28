@@ -74,6 +74,8 @@
   }
 
   $effect(() => {
+    // Re-fetch whenever anything triggered a refresh (move, edit, remote merge).
+    void appState.refreshCounter;
     if (isSearching) {
       entries = searchResults;
     } else if (groupUuid) {

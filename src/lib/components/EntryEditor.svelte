@@ -90,6 +90,27 @@
     if (uuid) void load(uuid);
   });
 
+  // Silently re-sync from disk when something external touched the DB
+  // (DnD move, remote merge, etc.) — but only while we're idle in read
+  // mode. We never blow away an in-progress edit.
+  $effect(() => {
+    void appState.refreshCounter;
+    if (uuid && loaded && !editing && !hasChanges) {
+      void silentReload();
+    }
+  });
+
+  async function silentReload() {
+    try {
+      const e = await getEntry(uuid);
+      entry = e;
+      formData = { ...e };
+      repeatPassword = e.password;
+    } catch {
+      // ignore — stay on whatever we had
+    }
+  }
+
   async function load(id: string) {
     try {
       const e = await getEntry(id);
