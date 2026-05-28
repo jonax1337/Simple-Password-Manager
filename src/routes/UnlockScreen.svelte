@@ -182,7 +182,7 @@
           <button
             type="button"
             onclick={handleSelectFile}
-            class="group/file w-full flex items-center gap-2.5 h-10 rounded-md border border-input bg-card hover:bg-accent/30 px-3 transition-colors text-left"
+            class="group/file w-full flex items-center gap-2.5 h-9 rounded-md border border-input bg-card hover:bg-accent/30 px-3 transition-colors text-left"
           >
             <FolderOpen class="size-4 text-muted-foreground shrink-0" />
             <span class="flex-1 min-w-0 text-[13px] truncate {fileLabel ? '' : 'text-muted-foreground'}">
@@ -203,7 +203,6 @@
             bind:value={password}
             onkeydown={(e) => e.key === "Enter" && handleUnlock()}
             placeholder="Enter your master password"
-            class="h-10"
           />
         </div>
 
@@ -221,7 +220,7 @@
 
         <div class="space-y-2">
           {#if helloShown}
-            <Button onclick={handleHelloUnlock} disabled={loading || !filePath} class="w-full h-10">
+            <Button onclick={handleHelloUnlock} disabled={loading || !filePath} class="w-full">
               <Fingerprint class="size-4" />
               Unlock with Windows Hello
             </Button>
@@ -229,7 +228,7 @@
               onclick={handleUnlock}
               variant="outline"
               disabled={loading || !filePath || !password}
-              class="w-full h-10"
+              class="w-full"
             >
               {#if loading}
                 {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
@@ -238,7 +237,7 @@
               {/if}
             </Button>
           {:else}
-            <Button onclick={handleUnlock} disabled={loading || !filePath || !password} class="w-full h-10">
+            <Button onclick={handleUnlock} disabled={loading || !filePath || !password} class="w-full">
               {#if loading}
                 {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
               {:else}
@@ -255,7 +254,7 @@
           </div>
         </div>
 
-        <Button variant="outline" onclick={() => (showCreateDialog = true)} class="w-full h-10">
+        <Button variant="outline" onclick={() => (showCreateDialog = true)} class="w-full">
           <Plus class="size-4" />
           Create a new database
         </Button>

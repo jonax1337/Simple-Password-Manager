@@ -398,7 +398,7 @@
               type="button"
               onclick={startEdit}
               title="Edit"
-              class="h-8 px-3 inline-flex items-center gap-1.5 rounded-md bg-primary/10 hover:bg-primary/15 text-primary text-[12.5px] font-medium transition-colors"
+              class="h-9 px-3 inline-flex items-center gap-1.5 rounded-md bg-primary/10 hover:bg-primary/15 text-primary text-[12.5px] font-medium transition-colors"
             >
               <Pencil class="size-3.5" />
               <span>Edit</span>
@@ -646,7 +646,7 @@
               value={formData.title}
               oninput={(e) => patch({ title: e.currentTarget.value })}
               placeholder="Entry title"
-              class="text-lg font-semibold h-10"
+              class="text-base font-semibold"
             />
             <p class="text-[11px] text-muted-foreground mt-1.5">
               {#if hasChanges}

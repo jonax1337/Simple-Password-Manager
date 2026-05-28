@@ -153,7 +153,6 @@
             bind:value={password}
             onkeydown={(e) => e.key === "Enter" && handleUnlock()}
             placeholder="Enter your master password"
-            class="h-10"
             autofocus
           />
         </div>
@@ -172,11 +171,11 @@
 
         <div class="space-y-2">
           {#if helloShown}
-            <Button onclick={handleHelloUnlock} disabled={loading} class="w-full h-10">
+            <Button onclick={handleHelloUnlock} disabled={loading} class="w-full">
               <Fingerprint class="size-4" />
               Unlock with Windows Hello
             </Button>
-            <Button onclick={handleUnlock} variant="outline" disabled={loading || !password} class="w-full h-10">
+            <Button onclick={handleUnlock} variant="outline" disabled={loading || !password} class="w-full">
               {#if loading}
                 {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
               {:else}
@@ -184,7 +183,7 @@
               {/if}
             </Button>
           {:else}
-            <Button onclick={handleUnlock} disabled={loading || !password} class="w-full h-10">
+            <Button onclick={handleUnlock} disabled={loading || !password} class="w-full">
               {#if loading}
                 {yubikeyHint ? "Touch your Yubikey…" : "Unlocking…"}
               {:else}

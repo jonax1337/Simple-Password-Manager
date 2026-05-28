@@ -13,6 +13,8 @@
     ArrowUpDown,
     CheckSquare,
     X,
+    Check,
+    GripVertical,
   } from "@lucide/svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -363,7 +365,7 @@
           type="text"
           bind:value={filter}
           placeholder="Filter…"
-          class="h-8 w-full rounded-md border border-input bg-background/70 pl-8 pr-7 text-[12.5px] outline-none focus-visible:border-ring focus-visible:ring-ring/40 focus-visible:ring-2 transition-shadow"
+          class="h-9 w-full rounded-md border border-input bg-background/70 pl-8 pr-7 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-ring/40 focus-visible:ring-2 transition-shadow"
         />
         {#if filter}
           <button
@@ -417,6 +419,7 @@
           {@const isSelected = selectedEntryUuid === entry.uuid}
           {@const isChecked = selection.has(entry.uuid)}
           {@const tint = tileTint(entry.uuid)}
+          {@const selectionActive = selection.size > 0}
           <li>
             <div
               role="button"
@@ -444,29 +447,34 @@
                 }
               }}
             >
-              <span
-                class="size-4 grid place-items-center shrink-0 {selection.size > 0 || isChecked
-                  ? 'opacity-100'
-                  : 'opacity-0 group-hover/row:opacity-100'} transition-opacity"
+              <!--
+                Leftmost icon/checkbox tile — Gmail-style.
+                Default shows the entry's icon; hover or selection-mode
+                swaps to a checkbox; click toggles selection (doesn't open).
+              -->
+              <button
+                type="button"
                 onclick={(e: MouseEvent) => toggleSelect(entry.uuid, e)}
-                role="presentation"
+                aria-label={isChecked ? "Deselect" : "Select"}
+                title={isChecked ? "Deselect" : "Select"}
+                class="relative grid place-items-center size-9 rounded-lg shrink-0 transition-colors {isChecked
+                  ? 'bg-primary text-primary-foreground'
+                  : selectionActive
+                    ? 'bg-muted text-muted-foreground hover:bg-primary/15 hover:text-primary'
+                    : tint + ' hover:bg-primary/15 hover:text-primary'}"
               >
-                <span
-                  class="size-3.5 rounded-[3px] border {isChecked
-                    ? 'bg-primary border-primary'
-                    : 'border-input bg-background'} flex items-center justify-center"
-                >
-                  {#if isChecked}
-                    <svg viewBox="0 0 24 24" class="size-2.5 text-primary-foreground" fill="none" stroke="currentColor" stroke-width="3">
-                      <path d="M5 12l5 5L20 7" />
-                    </svg>
-                  {/if}
-                </span>
-              </span>
-
-              <span class="grid place-items-center size-10 rounded-lg shrink-0 {tint}">
-                <DynamicIcon iconId={iconId} class="size-[18px]" />
-              </span>
+                {#if isChecked}
+                  <Check class="size-4" />
+                {:else if selectionActive}
+                  <span class="size-4 rounded-[4px] border-2 border-current"></span>
+                {:else}
+                  <!-- Default: icon visible, swaps to empty checkbox on row-hover -->
+                  <DynamicIcon iconId={iconId} class="size-[18px] group-hover/row:opacity-0 transition-opacity" />
+                  <span class="absolute inset-0 grid place-items-center opacity-0 group-hover/row:opacity-100 transition-opacity">
+                    <span class="size-4 rounded-[4px] border-2 border-current"></span>
+                  </span>
+                {/if}
+              </button>
 
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-1.5">
@@ -483,6 +491,10 @@
               </div>
 
               <div class="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 transition-opacity shrink-0">
+                <!-- Drag handle indicator (visual cue only; the whole row is the drag source). -->
+                <span class="text-muted-foreground/50 px-0.5" title="Drag to move">
+                  <GripVertical class="size-4" />
+                </span>
                 <button
                   type="button"
                   class="size-7 inline-flex items-center justify-center rounded hover:bg-foreground/8 text-muted-foreground hover:text-foreground"
