@@ -135,11 +135,23 @@
     e.dataTransfer.effectAllowed = "move";
   }
 
+  function isAcceptedDrag(dt: DataTransfer): boolean {
+    const types = Array.from(dt.types);
+    return types.includes(DT_FOLDER) || types.includes(DT_ENTRY);
+  }
+
+  // Both dragenter and dragover need preventDefault — without dragenter
+  // some Chromium builds skip the dragover entirely.
+  function onFolderDragEnter(e: DragEvent, uuid: string) {
+    const dt = e.dataTransfer;
+    if (!dt || !isAcceptedDrag(dt)) return;
+    e.preventDefault();
+    if (dropTarget !== uuid) dropTarget = uuid;
+  }
+
   function onFolderDragOver(e: DragEvent, uuid: string) {
     const dt = e.dataTransfer;
-    if (!dt) return;
-    const types = Array.from(dt.types);
-    if (!types.includes(DT_FOLDER) && !types.includes(DT_ENTRY)) return;
+    if (!dt || !isAcceptedDrag(dt)) return;
     e.preventDefault();
     dt.dropEffect = "move";
     if (dropTarget !== uuid) dropTarget = uuid;
@@ -232,9 +244,18 @@
     aria-selected={isSelected}
     draggable={depth > 0}
     ondragstart={(e) => onFolderDragStart(e, g.uuid)}
+    ondragenter={(e) => onFolderDragEnter(e, g.uuid)}
     ondragover={(e) => onFolderDragOver(e, g.uuid)}
     ondragleave={() => onFolderDragLeave(g.uuid)}
     ondrop={(e) => onFolderDrop(e, g.uuid)}
+    onclick={() => onSelectGroup(g.uuid)}
+    ondblclick={() => { if (hasChildren) toggle(g.uuid); }}
+    onkeydown={(e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onSelectGroup(g.uuid);
+      }
+    }}
     class="group/row flex items-center gap-1 pr-1.5 h-7 rounded-md transition-colors cursor-pointer active:cursor-grabbing {isSelected
       ? 'bg-selected text-selected-foreground'
       : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground'} {isDropTarget
@@ -262,23 +283,16 @@
       class="size-3.5 shrink-0 {isSelected ? 'text-current' : 'text-muted-foreground'}"
     />
 
-    <button
-      type="button"
-      class="flex-1 text-left text-[12.5px] font-medium truncate min-w-0"
-      onclick={() => onSelectGroup(g.uuid)}
-      ondblclick={(e) => {
-        e.stopPropagation();
-        if (hasChildren) toggle(g.uuid);
-      }}
-    >
+    <span class="flex-1 text-left text-[12.5px] font-medium truncate min-w-0 select-none">
       {g.name}
-    </button>
+    </span>
 
     <DropdownMenu align="end">
       {#snippet trigger()}
         <button
           type="button"
           aria-label="Folder actions"
+          onclick={(e: MouseEvent) => e.stopPropagation()}
           class="opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 size-5 inline-flex items-center justify-center rounded hover:bg-foreground/10"
         >
           <MoreHorizontal class="size-3.5" />

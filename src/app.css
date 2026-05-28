@@ -3,65 +3,61 @@
 @custom-variant dark (&:is([data-theme="dark"] *));
 
 :root {
-  /* 1Password 8 inspired light palette */
+  /* Palette keyed to the app icon (indigo-violet shield, hue ~282°) */
   --background: oklch(1 0 0);
-  --foreground: oklch(0.18 0.012 250);
+  --foreground: oklch(0.18 0.012 282);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.012 250);
+  --card-foreground: oklch(0.18 0.012 282);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.012 250);
-  /* Sidebar and list backgrounds — distinctly cooler than the canvas */
-  --sidebar: oklch(0.972 0.006 248);
-  --list: oklch(0.985 0.004 248);
-  /* 1Password blue accent */
-  --primary: oklch(0.55 0.20 252);
+  --popover-foreground: oklch(0.18 0.012 282);
+  --sidebar: oklch(0.972 0.008 282);
+  --list: oklch(0.985 0.005 282);
+  --primary: oklch(0.56 0.20 282);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.965 0.006 248);
-  --secondary-foreground: oklch(0.18 0.012 250);
-  --muted: oklch(0.96 0.005 248);
-  --muted-foreground: oklch(0.50 0.012 248);
-  --accent: oklch(0.945 0.018 252);
-  --accent-foreground: oklch(0.32 0.18 252);
+  --secondary: oklch(0.965 0.008 282);
+  --secondary-foreground: oklch(0.18 0.012 282);
+  --muted: oklch(0.96 0.006 282);
+  --muted-foreground: oklch(0.50 0.014 282);
+  --accent: oklch(0.945 0.022 282);
+  --accent-foreground: oklch(0.34 0.18 282);
   --destructive: oklch(0.58 0.235 27);
   --destructive-foreground: oklch(0.99 0 0);
   --success: oklch(0.6 0.18 145);
   --warning: oklch(0.75 0.16 75);
-  --border: oklch(0.91 0.006 248);
-  --input: oklch(0.91 0.006 248);
-  --ring: oklch(0.55 0.20 252);
-  /* Soft tinted selection background (used for selected rows / nav items) */
-  --selected: oklch(0.94 0.04 252);
-  --selected-foreground: oklch(0.34 0.18 252);
+  --border: oklch(0.91 0.008 282);
+  --input: oklch(0.91 0.008 282);
+  --ring: oklch(0.56 0.20 282);
+  --selected: oklch(0.93 0.06 282);
+  --selected-foreground: oklch(0.36 0.18 282);
   --radius: 0.625rem;
 }
 
 [data-theme="dark"] {
-  /* 1Password 8 inspired dark palette */
-  --background: oklch(0.185 0.008 250);
-  --foreground: oklch(0.965 0.005 248);
-  --card: oklch(0.225 0.008 250);
-  --card-foreground: oklch(0.965 0.005 248);
-  --popover: oklch(0.225 0.008 250);
-  --popover-foreground: oklch(0.965 0.005 248);
-  --sidebar: oklch(0.158 0.008 250);
-  --list: oklch(0.205 0.008 250);
-  --primary: oklch(0.68 0.17 252);
-  --primary-foreground: oklch(0.16 0.012 250);
-  --secondary: oklch(0.265 0.008 250);
-  --secondary-foreground: oklch(0.965 0.005 248);
-  --muted: oklch(0.27 0.008 250);
-  --muted-foreground: oklch(0.70 0.012 248);
-  --accent: oklch(0.32 0.05 252);
-  --accent-foreground: oklch(0.86 0.13 252);
+  --background: oklch(0.185 0.008 282);
+  --foreground: oklch(0.965 0.005 282);
+  --card: oklch(0.225 0.008 282);
+  --card-foreground: oklch(0.965 0.005 282);
+  --popover: oklch(0.225 0.008 282);
+  --popover-foreground: oklch(0.965 0.005 282);
+  --sidebar: oklch(0.158 0.008 282);
+  --list: oklch(0.205 0.008 282);
+  --primary: oklch(0.70 0.16 282);
+  --primary-foreground: oklch(0.16 0.012 282);
+  --secondary: oklch(0.265 0.008 282);
+  --secondary-foreground: oklch(0.965 0.005 282);
+  --muted: oklch(0.27 0.008 282);
+  --muted-foreground: oklch(0.70 0.012 282);
+  --accent: oklch(0.32 0.06 282);
+  --accent-foreground: oklch(0.86 0.13 282);
   --destructive: oklch(0.70 0.19 22);
   --destructive-foreground: oklch(0.99 0 0);
   --success: oklch(0.72 0.17 145);
   --warning: oklch(0.80 0.15 75);
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.68 0.17 252);
-  --selected: oklch(0.36 0.10 252);
-  --selected-foreground: oklch(0.92 0.10 252);
+  --ring: oklch(0.70 0.16 282);
+  --selected: oklch(0.36 0.11 282);
+  --selected-foreground: oklch(0.92 0.10 282);
 }
 
 @theme inline {
