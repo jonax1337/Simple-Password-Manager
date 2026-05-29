@@ -1,4 +1,4 @@
-name: Next.js Frontend Check
+name: Frontend Check
 
 on:
   push:
@@ -26,11 +26,11 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Run ESLint
-      run: npm run lint
+    - name: Type-check Svelte
+      run: npm run check
 
     - name: Run Vitest
       run: npm test
 
-    - name: Build Next.js
+    - name: Build (Vite)
       run: npm run build

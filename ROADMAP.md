@@ -1,6 +1,12 @@
 # Roadmap — Richtung 1Password
 
-Stand: 2026-05-26. Ziel: Von "lokaler KeePass-Client" zu vollwertiger Password-Suite (Desktop + Browser + Sync). Phasen sind so geordnet, dass jede für sich abgeschlossen ist und keine spätere Phase blockiert.
+Stand: 2026-05-29. Ziel: Von "lokaler KeePass-Client" zu vollwertiger Password-Suite (Desktop + Browser + Sync). Phasen sind so geordnet, dass jede für sich abgeschlossen ist und keine spätere Phase blockiert.
+
+## Status
+
+- **Phase 1 (Quick Wins): ✅ ausgeliefert** — Close-to-Tray, Autostart, Update-Workflow, signed Bundles.
+- **v2.0 (Mai 2026): ✅ ausgeliefert** — kompletter Frontend-Rewrite von Next.js/React → **Svelte 5 + Vite**, 1Password-Stil 3-Pane-Layout, Read-Mode-Detail mit Edit-Toggle, Auto-Save, Command Palette (`Ctrl+K`), Settings als Dialog, Live-Updates über alle Panes, neue Indigo-Violett-Palette, DnD voll funktional. Dateipfade in den älteren Phasen-Notizen unten (`components/Settings.tsx`, `lib/storage.ts` etc.) sind aus der React-Ära — die Funktionen leben jetzt unter `src/lib/` und `src/lib/components/`.
+- **Nächste Schritte:** Phase 2 (Performance-Profiling auf der Svelte-Codebase), dann Phase 3 (Browser Extension).
 
 ---
 
