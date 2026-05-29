@@ -7,9 +7,9 @@
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
   [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)](https://tauri.app)
-  [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org)
+  [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=for-the-badge&logo=svelte&logoColor=white)](https://svelte.dev)
+  [![Vite](https://img.shields.io/badge/Vite-6-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
   [![Rust](https://img.shields.io/badge/Rust-stable-DEA584?style=for-the-badge&logo=rust&logoColor=black)](https://rust-lang.org)
-  [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
 
 </div>
 
@@ -23,7 +23,7 @@ Simple Password Manager helps you store all your passwords in one secure place. 
 - **Works offline** – Your passwords stay on your computer, never uploaded anywhere
 - **No account needed** – Just download and use, no sign-up required
 - **Compatible with KeePass** – Use your existing `.kdbx` files or create new ones
-- **Works on Windows, macOS, and Linux**
+- **Works on Windows and Linux** (macOS builds paused while a Tauri upstream issue is resolved)
 
 ---
 
@@ -35,33 +35,53 @@ Simple Password Manager helps you store all your passwords in one secure place. 
 
 ---
 
+## What's new in 2.0
+
+The whole frontend was rebuilt from React/Next.js to **Svelte 5 + Vite** with a 1Password-inspired three-pane layout.
+
+- **Three-pane layout** — sidebar / item list / detail pane, all resizable.
+- **Inline detail view with read/edit toggle** — instead of popping out a new window.
+- **Auto-save** — every change flushes to disk in milliseconds. No more Ctrl+S.
+- **Command palette** (`Ctrl+K`) — jump to any folder, entry, or action.
+- **Settings as a dialog** — modal with internal nav, no separate window.
+- **Indigo-violet palette** keyed to the app icon, in light and dark mode.
+- **Drag & drop restored** — move entries between folders, reorganise the tree.
+- **Live updates everywhere** — moving an entry, changing an icon, or a remote merge all reflect instantly without refreshing.
+
+---
+
 ## Features at a Glance
 
 ### Core Features
 - **Open or create KeePass databases** (KDBX 3 & 4 format)
 - **Organize passwords into folders** (groups)
-- **Search** across all your entries instantly
+- **Search & jump** to anything with `Ctrl+K`
 - **Generate strong passwords** with one click
 - **Mark favorites** for quick access
-- **Edit entries in separate windows** – work on multiple at once
+- **Inline detail pane** — view, edit, and save without leaving the main window
 
 ### Security Features
 - **AES-256 encryption** – industry-standard protection
+- **Argon2id key derivation** – memory-hard, slows down brute-force attacks
 - **Auto-lock** – automatically locks after inactivity
 - **Clipboard auto-clear** – passwords are removed from clipboard after 30 seconds
-- **Breach detection** – check if your passwords appeared in known data breaches (optional)
+- **Breach detection** – check if your passwords appeared in known data breaches (optional, opt-in)
 - **Quick Unlock** – fast re-authentication for recently opened databases
+- **Yubikey HMAC-SHA1 challenge-response** as a second factor (optional)
+- **Windows Hello** quick unlock layered on top of the master password (Windows only)
 
 ### Quality of Life
-- **Light & Dark themes** – easy on the eyes
-- **Drag & drop** – organize entries and folders intuitively  
+- **Auto-save** – nothing is ever lost between session and disk
+- **Light & Dark themes** – easy on the eyes, follows system by default
+- **Drag & drop** – move entries between folders intuitively
 - **69 built-in icons** – personalize your entries
-- **Undo/Redo** – made a mistake? No problem
-- **Password history** – see previous versions of each entry
+- **Undo/Redo** – made a mistake? `Ctrl+Z` / `Ctrl+Y`
+- **Password history** – see previous versions of each entry, restore in one click
 - **Custom fields** – store additional information
 - **Expiration dates** – get reminded when passwords need updating
-- **Live updates** – automatically detect external changes to your database
+- **Silent remote merge** – when the file is edited elsewhere, changes are merged automatically
 - **System tray** – minimize to tray instead of closing
+- **Browser extension hook** – connect a native messaging host for in-browser use
 
 ---
 
@@ -69,14 +89,14 @@ Simple Password Manager helps you store all your passwords in one secure place. 
 
 | Shortcut | What it does |
 |----------|--------------|
-| `Ctrl+S` (Win/Linux) / `Cmd+S` (Mac) | Save your database |
-| `Ctrl+N` / `Cmd+N` | Create a new database |
-| `Ctrl+F` / `Cmd+F` | Open/close search |
+| `Ctrl+K` / `Cmd+K` | Open the command palette (search anything, run actions) |
+| `Ctrl+,` / `Cmd+,` | Open Settings |
 | `Ctrl+Z` / `Cmd+Z` | Undo last action |
-| `Ctrl+Y` / `Cmd+Shift+Z` | Redo |
-| `Ctrl+Alt+W` / `Cmd+Alt+W` | Close the current database |
-| `Escape` | Close search |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo |
 | `Enter` | Unlock database (on password screen) |
+| `Esc` | Close the command palette or current dialog |
+
+Saving is automatic — no shortcut needed.
 
 ---
 
@@ -85,7 +105,7 @@ Simple Password Manager helps you store all your passwords in one secure place. 
 ### Download & Install
 
 **Option 1: Download a Release** (Recommended)
-1. Go to the [Releases](https://github.com/jonax1337/Password-Manager/releases) page
+1. Go to the [Releases](https://github.com/jonax1337/Simple-Password-Manager/releases) page
 2. Download the installer for your operating system
 3. Run the installer and follow the prompts
 
@@ -97,8 +117,8 @@ Prerequisites:
 - Platform-specific requirements: see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ```bash
-git clone https://github.com/jonax1337/Password-Manager.git
-cd Password-Manager
+git clone https://github.com/jonax1337/Simple-Password-Manager.git
+cd Simple-Password-Manager
 npm install
 npm run tauri:dev     # Development mode
 npm run tauri:build   # Production build
@@ -109,46 +129,51 @@ npm run tauri:build   # Production build
 1. **Launch the app** – You'll see a welcome screen
 2. **Create a new database** or **open an existing one** (`.kdbx` file)
 3. **Set a strong master password** – This is the only password you need to remember!
-4. **Start adding your passwords** – Click the `+` button or right-click for options
+4. **Start adding your passwords** – Click the `+` in the item list to add an entry
 
 ### Tips for Daily Use
 
-- **Double-click** an entry to edit it in a new window
-- **Right-click** anywhere for quick actions
-- **Drag and drop** entries between folders to organize them
-- **Star** your most-used entries to find them quickly in the Favorites view
-- **Use the password generator** (wand icon) when creating new entries
+- **Hit `Ctrl+K`** from anywhere to search and jump to entries, folders, or actions
+- **Single-click** an entry to see its detail; click **Edit** to modify it
+- **Drag and drop** entries onto folders to move them
+- **Star** your most-used entries to find them in the Favorites view
+- **Use the password generator** (wand icon in edit mode) when creating new entries
 
 ---
 
 ## Settings
 
-Access settings via the gear icon in the title bar.
+Open Settings with the gear icon in the sidebar (or `Ctrl+,`). The dialog has its own internal nav:
 
 ### Appearance
 Choose between **Light**, **Dark**, or **System** theme.
 
 ### Security
-- **Auto-Lock Timer** – Lock the database after X seconds of inactivity (set to 0 to disable)
-- **Breach Detection** – Enable checking passwords against the "Have I Been Pwned" database. This uses a privacy-safe method (k-anonymity) where only partial hashes are sent.
+- **Auto-Lock Timer** – Lock the database after X seconds of inactivity (set to *Never* to disable)
+- **Breach Detection (HIBP)** – Enable checking passwords against the "Have I Been Pwned" database. Uses k-anonymity — only partial hashes leave your machine.
+- **Yubikey** – Enroll a Yubikey as a second factor for unlocking this database
+- **Windows Hello** – Seal the master password behind Windows Hello for quick unlock (Windows only)
 
 ### Database
-- **Live Updates** – When enabled, the app automatically detects and merges changes if someone else edits the same database file.
+Saves and remote merges happen automatically. The path of the open database is shown for reference.
 
 ### Application
-- **Close to Tray** – When you click X, minimize to system tray instead of quitting.
+- **Close to Tray** – When you close the window, minimize to system tray instead of quitting.
+- **Autostart** – Launch the app when you sign in.
+- **Updates** – Check for and install the next version.
+- **Browser extension** – Register the native messaging host for a browser extension.
 
 ---
 
 ## Dashboard
 
-When you open a database, you'll see a **Dashboard** with:
+The Home view shows:
 
-- **Total entries and groups** in your database
-- **Health Score** – An overall security rating
+- **Total entries and folders** in your database
+- **Health Score** – Overall security rating
 - **Average password strength** – How strong are your passwords on average?
 - **Security issues** – Weak, reused, old, or expired passwords that need attention
-- **Breached passwords** – Passwords found in known data breaches (if enabled)
+- **Breached passwords** – Passwords found in known data breaches (if HIBP is enabled)
 
 ---
 
@@ -162,7 +187,7 @@ Your database is protected by two security layers:
 
 2. **Database Encryption (AES-256)** – The actual data is encrypted with AES-256, the same standard used by governments and banks worldwide.
 
-*Older KeePass databases may use AES-KDF instead of Argon2id. The app will warn you and offer to upgrade.*
+*Older KeePass databases may use AES-KDF instead of Argon2id. The app will warn you on open and offer to upgrade.*
 
 ### Other Security Measures
 
@@ -171,7 +196,7 @@ Your database is protected by two security layers:
 | **Your passwords** | Never leave your computer – everything is stored locally |
 | **Clipboard** | Automatically cleared 30 seconds after copying a password |
 | **Memory** | Sensitive data is handled securely using Rust's `secrecy` library |
-| **Network** | Zero internet connections (except optional breach checking) |
+| **Network** | Zero internet connections (except optional breach checking and update checks) |
 
 > ⚠️ **Important:** This software has not undergone a professional security audit. For mission-critical use, consider established solutions like [KeePass](https://keepass.info/) or [KeePassXC](https://keepassxc.org/).
 
@@ -186,10 +211,10 @@ A: There is no way to recover your data. Your master password is the only key. W
 A: Yes! This app fully supports KDBX 3 and KDBX 4 formats used by KeePass and KeePassXC.
 
 **Q: Does this sync across devices?**  
-A: Not directly. You can sync your `.kdbx` file using any cloud storage (Dropbox, Google Drive, etc.) and open it on multiple devices. Enable "Live Updates" in settings to auto-merge changes.
+A: Not directly. You can sync your `.kdbx` file using any cloud storage (Dropbox, Google Drive, etc.) and open it on multiple devices. The app detects external changes and merges them silently — no action needed on your end.
 
 **Q: Is my data sent anywhere?**  
-A: No. Everything stays on your computer. The only exception is the optional breach detection feature, which sends partial password hashes (not actual passwords) to check against known breaches.
+A: No. Everything stays on your computer. The only exceptions are the optional breach detection feature (sends partial password hashes — never actual passwords — to check against known breaches) and the optional update check.
 
 **Q: Is this open source?**  
 A: Yes! MIT licensed. Feel free to inspect the code, contribute, or fork it.
@@ -208,7 +233,9 @@ Contributions are welcome! Whether it's bug reports, feature requests, or code c
 
 Built with:
 - [Tauri](https://tauri.app) – For the native desktop experience
-- [Next.js](https://nextjs.org) & [React](https://react.dev) – For the user interface
+- [Svelte 5](https://svelte.dev) & [Vite](https://vitejs.dev) – For the user interface
+- [bits-ui](https://bits-ui.com) – For accessible UI primitives
+- [Tailwind CSS](https://tailwindcss.com) – For styling
 - [Rust](https://rust-lang.org) – For the secure backend
 - [keepass-rs](https://crates.io/crates/keepass) – For KeePass database handling
 

@@ -60,8 +60,8 @@ jobs:
     
     - name: Install frontend dependencies
       run: npm ci
-    
-    - name: Build Next.js frontend
+
+    - name: Build Svelte frontend
       run: npm run build
     
     - name: Run cargo check

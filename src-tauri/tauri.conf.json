@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Simple Password Manager",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "identifier": "digital.laux.passwordmanager",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../out"
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
@@ -20,7 +20,8 @@
         "fullscreen": false,
         "decorations": false,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -41,6 +42,7 @@
             "core:window:allow-minimize",
             "core:window:allow-maximize",
             "core:window:allow-unmaximize",
+            "core:window:allow-toggle-maximize",
             "core:window:allow-is-maximized",
             "core:window:allow-start-dragging",
             "core:webview:allow-create-webview-window",
@@ -63,54 +65,6 @@
             "autostart:allow-enable",
             "autostart:allow-disable",
             "autostart:allow-is-enabled",
-            "updater:default",
-            "process:allow-restart"
-          ]
-        },
-        {
-          "identifier": "entry-capability",
-          "windows": ["entry-*"],
-          "permissions": [
-            "core:default",
-            "core:window:allow-close",
-            "core:window:allow-destroy",
-            "core:window:allow-minimize",
-            "core:window:allow-start-dragging",
-            "dialog:allow-ask",
-            "dialog:allow-confirm",
-            "fs:allow-read-file",
-            "fs:allow-write-file",
-            "clipboard-manager:allow-write-text",
-            "clipboard-manager:allow-clear"
-          ]
-        },
-        {
-          "identifier": "settings-capability",
-          "windows": ["settings"],
-          "permissions": [
-            "core:default",
-            "core:window:allow-close",
-            "core:window:allow-destroy",
-            "core:window:allow-minimize",
-            "core:window:allow-start-dragging",
-            "core:event:allow-emit",
-            "dialog:allow-ask",
-            "updater:default",
-            "process:allow-restart"
-          ]
-        },
-        {
-          "identifier": "about-capability",
-          "windows": ["about"],
-          "permissions": [
-            "core:default",
-            "core:window:allow-close",
-            "core:window:allow-destroy",
-            "core:window:allow-minimize",
-            "core:window:allow-is-maximized",
-            "core:window:allow-start-dragging",
-            "core:event:allow-listen",
-            "shell:allow-open",
             "updater:default",
             "process:allow-restart"
           ]

@@ -1,42 +1,27 @@
 {
   "compilerOptions": {
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
     "resolveJsonModule": true,
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
-    "jsx": "react-jsx",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["svelte", "node"],
+    "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
-    },
-    "target": "ES2017"
+      "$lib": ["src/lib"],
+      "$lib/*": ["src/lib/*"]
+    }
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "extension"
-  ]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts"]
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calculatePasswordStrength } from "@/lib/password-strength";
+import { calculatePasswordStrength } from "$lib/password-strength";
 
 describe("calculatePasswordStrength", () => {
   // ---------- edge cases ----------
