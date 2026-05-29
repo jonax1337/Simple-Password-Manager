@@ -385,7 +385,7 @@
               type="button"
               onclick={toggleFavorite}
               title={entry.is_favorite ? "Unfavorite" : "Favorite"}
-              class="size-8 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
+              class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
               aria-label={entry.is_favorite ? "Unfavorite" : "Favorite"}
             >
               {#if entry.is_favorite}
@@ -407,7 +407,7 @@
               {#snippet trigger()}
                 <button
                   type="button"
-                  class="size-8 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
+                  class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
                   aria-label="More actions"
                 >
                   <MoreHorizontal class="size-4" />
@@ -438,7 +438,7 @@
                 type="button"
                 onclick={onClose}
                 title="Close"
-                class="size-8 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
+                class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
                 aria-label="Close"
               >
                 <X class="size-4" />
@@ -662,7 +662,7 @@
               onclick={toggleFavorite}
               title={formData.is_favorite ? "Unfavorite" : "Favorite"}
               aria-label={formData.is_favorite ? "Unfavorite" : "Favorite"}
-              class="size-8 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
+              class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
             >
               {#if formData.is_favorite}
                 <Star class="size-4 text-warning fill-warning" />

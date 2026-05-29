@@ -319,7 +319,7 @@
           {#snippet trigger()}
             <button
               type="button"
-              class="size-8 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
+              class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Sort"
               title="Sort"
             >
@@ -347,7 +347,7 @@
         {#if !isSearching && (groupUuid || isFavoritesView)}
           <button
             type="button"
-            class="size-8 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs"
+            class="size-9 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs"
             onclick={() => (showCreate = true)}
             title="New item"
             aria-label="New item"
