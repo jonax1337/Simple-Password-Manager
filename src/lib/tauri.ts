@@ -331,18 +331,34 @@ export async function clearInitialFilePath(): Promise<void> {
   return invoke("clear_initial_file_path");
 }
 
-// Cloud sync
+// Cloud sync (multi-vault)
 
 export interface CloudStatus {
   linked: boolean;
   server_url: string | null;
   email: string | null;
-  has_remote_vault: boolean;
+  active_vault_id: string | null;
+  active_vault_name: string | null;
 }
 
 export interface CloudActionResp {
   email: string;
   server_url: string;
+}
+
+export interface CloudSignupResp extends CloudActionResp {
+  /// Shown to the user once. Lost = no password recovery later.
+  recovery_code: string;
+  initial_vault_id: string;
+}
+
+export interface CloudVaultEntry {
+  id: string;
+  name: string;
+  role: "owner" | "editor" | "reader";
+  owner_user_id: string;
+  etag: string;
+  updated_at: number;
 }
 
 export async function cloudStatus(): Promise<CloudStatus> {
@@ -353,8 +369,14 @@ export async function cloudSignup(
   serverUrl: string,
   email: string,
   masterPassword: string,
-): Promise<CloudActionResp> {
-  return invoke("cloud_signup", { serverUrl, email, masterPassword });
+  initialVaultName?: string,
+): Promise<CloudSignupResp> {
+  return invoke("cloud_signup", {
+    serverUrl,
+    email,
+    masterPassword,
+    initialVaultName: initialVaultName ?? null,
+  });
 }
 
 export async function cloudLogin(
@@ -363,6 +385,43 @@ export async function cloudLogin(
   masterPassword: string,
 ): Promise<CloudActionResp> {
   return invoke("cloud_login", { serverUrl, email, masterPassword });
+}
+
+export async function cloudRecover(
+  serverUrl: string,
+  email: string,
+  recoveryCode: string,
+  newMasterPassword: string,
+): Promise<CloudActionResp> {
+  return invoke("cloud_recover", {
+    serverUrl,
+    email,
+    recoveryCode,
+    newMasterPassword,
+  });
+}
+
+export async function cloudListVaults(): Promise<CloudVaultEntry[]> {
+  return invoke("cloud_list_vaults");
+}
+
+export async function cloudOpenVault(
+  vaultId: string,
+  targetPath: string,
+): Promise<void> {
+  return invoke("cloud_open_vault", { vaultId, targetPath });
+}
+
+export async function cloudCreateVault(name: string): Promise<{ id: string }> {
+  return invoke("cloud_create_vault", { name });
+}
+
+export async function cloudRenameVault(vaultId: string, name: string): Promise<void> {
+  return invoke("cloud_rename_vault", { vaultId, name });
+}
+
+export async function cloudDeleteVault(vaultId: string): Promise<void> {
+  return invoke("cloud_delete_vault", { vaultId });
 }
 
 export async function cloudPush(): Promise<void> {
@@ -375,4 +434,15 @@ export async function cloudPull(): Promise<void> {
 
 export async function cloudDisconnect(): Promise<void> {
   return invoke("cloud_disconnect");
+}
+
+// Persistence
+export async function cloudPersistSession(): Promise<boolean> {
+  return invoke("cloud_persist_session");
+}
+export async function cloudRehydrateSession(): Promise<boolean> {
+  return invoke("cloud_rehydrate_session");
+}
+export async function cloudForgetSession(): Promise<void> {
+  return invoke("cloud_forget_session");
 }

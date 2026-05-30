@@ -120,7 +120,8 @@
     linked: false,
     server_url: null,
     email: null,
-    has_remote_vault: false,
+    active_vault_id: null,
+    active_vault_name: null,
   });
   let cloudMode = $state<"signup" | "login">("login");
   let cloudServerUrl = $state(

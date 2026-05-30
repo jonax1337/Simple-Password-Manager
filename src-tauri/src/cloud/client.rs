@@ -1,6 +1,4 @@
-//! Typed HTTP client mirroring the server's REST surface. All wire types live
-//! here so the server can evolve them in tandem (mirror copies; not a shared
-//! crate yet — that's a later refactor if the server moves out of-repo).
+//! Typed HTTP client mirroring the multi-vault server's REST surface.
 
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -25,6 +23,8 @@ impl From<reqwest::Error> for CloudError {
     }
 }
 
+// ----- auth -----
+
 #[derive(Debug, Serialize)]
 struct SignupReq<'a> {
     email: &'a str,
@@ -32,7 +32,11 @@ struct SignupReq<'a> {
     client_auth_hash: &'a str,
     wrapped_master_key_b64: &'a str,
     recovery_blob_b64: &'a str,
+    account_pubkey_b64: &'a str,
+    wrapped_account_privkey_b64: &'a str,
+    initial_vault_name: &'a str,
     initial_vault_blob_b64: &'a str,
+    initial_wrapped_vault_key_b64: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,8 +62,6 @@ pub struct LoginResp {
 #[derive(Debug, Serialize)]
 struct EmailOnlyReq<'a> {
     email: &'a str,
-    // Server's kdf_params handler reuses LoginReq shape; we send a dummy auth
-    // hash that gets ignored. Keeps the server's deserialization happy.
     client_auth_hash: &'a str,
 }
 
@@ -92,10 +94,49 @@ pub struct ResetResp {
     pub token: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct GetVaultResp {
+// ----- vaults -----
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
+pub struct VaultSummary {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub owner_user_id: String,
     pub etag: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub wrapped_vault_key_b64: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListVaultsResp {
+    pub vaults: Vec<VaultSummary>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VaultFull {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub owner_user_id: String,
+    pub etag: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub wrapped_vault_key_b64: String,
     pub ciphertext_b64: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateVaultReq<'a> {
+    name: &'a str,
+    ciphertext_b64: &'a str,
+    wrapped_vault_key_b64: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateVaultResp {
+    pub id: String,
+    pub etag: String,
     pub updated_at: i64,
 }
 
@@ -109,6 +150,11 @@ struct PutVaultReq<'a> {
 pub struct PutVaultResp {
     pub etag: String,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct RenameVaultReq<'a> {
+    name: &'a str,
 }
 
 #[derive(Clone)]
@@ -125,25 +171,51 @@ impl CloudClient {
         }
     }
 
-    pub async fn signup(
-        &self,
-        email: &str,
-        kdf_salt_b64: &str,
-        client_auth_hash: &str,
-        wrapped_master_key_b64: &str,
-        recovery_blob_b64: &str,
-        initial_vault_blob_b64: &str,
-    ) -> Result<SignupResp, CloudError> {
+    pub async fn signup(&self, req: SignupArgs<'_>) -> Result<SignupResp, CloudError> {
         let res = self
             .http
             .post(format!("{}/auth/signup", self.base_url))
             .json(&SignupReq {
+                email: req.email,
+                kdf_salt_b64: req.kdf_salt_b64,
+                client_auth_hash: req.client_auth_hash,
+                wrapped_master_key_b64: req.wrapped_master_key_b64,
+                recovery_blob_b64: req.recovery_blob_b64,
+                account_pubkey_b64: req.account_pubkey_b64,
+                wrapped_account_privkey_b64: req.wrapped_account_privkey_b64,
+                initial_vault_name: req.initial_vault_name,
+                initial_vault_blob_b64: req.initial_vault_blob_b64,
+                initial_wrapped_vault_key_b64: req.initial_wrapped_vault_key_b64,
+            })
+            .send()
+            .await?;
+        self.parse_json(res).await
+    }
+
+    pub async fn login(
+        &self,
+        email: &str,
+        client_auth_hash: &str,
+    ) -> Result<LoginResp, CloudError> {
+        let res = self
+            .http
+            .post(format!("{}/auth/login", self.base_url))
+            .json(&LoginReq {
                 email,
-                kdf_salt_b64,
                 client_auth_hash,
-                wrapped_master_key_b64,
-                recovery_blob_b64,
-                initial_vault_blob_b64,
+            })
+            .send()
+            .await?;
+        self.parse_json(res).await
+    }
+
+    pub async fn kdf_params(&self, email: &str) -> Result<KdfParamsResp, CloudError> {
+        let res = self
+            .http
+            .post(format!("{}/auth/kdf-params", self.base_url))
+            .json(&EmailOnlyReq {
+                email,
+                client_auth_hash: "x",
             })
             .send()
             .await?;
@@ -181,40 +253,20 @@ impl CloudClient {
         self.parse_json(res).await
     }
 
-    pub async fn login(
-        &self,
-        email: &str,
-        client_auth_hash: &str,
-    ) -> Result<LoginResp, CloudError> {
+    pub async fn list_vaults(&self, token: &str) -> Result<ListVaultsResp, CloudError> {
         let res = self
             .http
-            .post(format!("{}/auth/login", self.base_url))
-            .json(&LoginReq {
-                email,
-                client_auth_hash,
-            })
+            .get(format!("{}/vaults", self.base_url))
+            .bearer_auth(token)
             .send()
             .await?;
         self.parse_json(res).await
     }
 
-    pub async fn kdf_params(&self, email: &str) -> Result<KdfParamsResp, CloudError> {
+    pub async fn get_vault(&self, token: &str, vault_id: &str) -> Result<VaultFull, CloudError> {
         let res = self
             .http
-            .post(format!("{}/auth/kdf-params", self.base_url))
-            .json(&EmailOnlyReq {
-                email,
-                client_auth_hash: "x",
-            })
-            .send()
-            .await?;
-        self.parse_json(res).await
-    }
-
-    pub async fn get_vault(&self, token: &str) -> Result<GetVaultResp, CloudError> {
-        let res = self
-            .http
-            .get(format!("{}/vault", self.base_url))
+            .get(format!("{}/vaults/{}", self.base_url, vault_id))
             .bearer_auth(token)
             .send()
             .await?;
@@ -224,12 +276,13 @@ impl CloudClient {
     pub async fn put_vault(
         &self,
         token: &str,
+        vault_id: &str,
         ciphertext_b64: &str,
         expected_etag: Option<&str>,
     ) -> Result<PutVaultResp, CloudError> {
         let res = self
             .http
-            .put(format!("{}/vault", self.base_url))
+            .put(format!("{}/vaults/{}", self.base_url, vault_id))
             .bearer_auth(token)
             .json(&PutVaultReq {
                 ciphertext_b64,
@@ -238,6 +291,57 @@ impl CloudClient {
             .send()
             .await?;
         self.parse_json(res).await
+    }
+
+    pub async fn create_vault(
+        &self,
+        token: &str,
+        name: &str,
+        ciphertext_b64: &str,
+        wrapped_vault_key_b64: &str,
+    ) -> Result<CreateVaultResp, CloudError> {
+        let res = self
+            .http
+            .post(format!("{}/vaults", self.base_url))
+            .bearer_auth(token)
+            .json(&CreateVaultReq {
+                name,
+                ciphertext_b64,
+                wrapped_vault_key_b64,
+            })
+            .send()
+            .await?;
+        self.parse_json(res).await
+    }
+
+    pub async fn rename_vault(
+        &self,
+        token: &str,
+        vault_id: &str,
+        name: &str,
+    ) -> Result<(), CloudError> {
+        let res = self
+            .http
+            .patch(format!("{}/vaults/{}", self.base_url, vault_id))
+            .bearer_auth(token)
+            .json(&RenameVaultReq { name })
+            .send()
+            .await?;
+        self.parse_unit(res).await
+    }
+
+    pub async fn delete_vault(
+        &self,
+        token: &str,
+        vault_id: &str,
+    ) -> Result<(), CloudError> {
+        let res = self
+            .http
+            .delete(format!("{}/vaults/{}", self.base_url, vault_id))
+            .bearer_auth(token)
+            .send()
+            .await?;
+        self.parse_unit(res).await
     }
 
     async fn parse_json<T: for<'de> Deserialize<'de>>(
@@ -249,14 +353,43 @@ impl CloudClient {
             return Ok(res.json().await?);
         }
         let body = res.text().await.unwrap_or_default();
+        Err(self.status_to_err(status, body))
+    }
+
+    async fn parse_unit(&self, res: reqwest::Response) -> Result<(), CloudError> {
+        let status = res.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let body = res.text().await.unwrap_or_default();
+        Err(self.status_to_err(status, body))
+    }
+
+    fn status_to_err(&self, status: StatusCode, body: String) -> CloudError {
         match status {
-            StatusCode::UNAUTHORIZED => Err(CloudError::Unauthorized),
-            StatusCode::CONFLICT => Err(CloudError::Conflict),
-            StatusCode::NOT_FOUND => Err(CloudError::NotFound),
-            _ => Err(CloudError::Http {
+            StatusCode::UNAUTHORIZED => CloudError::Unauthorized,
+            StatusCode::CONFLICT => CloudError::Conflict,
+            StatusCode::NOT_FOUND => CloudError::NotFound,
+            _ => CloudError::Http {
                 status: status.as_u16(),
                 body,
-            }),
+            },
         }
     }
+}
+
+/// Signup needs 10 wire fields. Bundling them into a struct keeps the
+/// call site readable and the field-name correspondence with the server
+/// obvious.
+pub struct SignupArgs<'a> {
+    pub email: &'a str,
+    pub kdf_salt_b64: &'a str,
+    pub client_auth_hash: &'a str,
+    pub wrapped_master_key_b64: &'a str,
+    pub recovery_blob_b64: &'a str,
+    pub account_pubkey_b64: &'a str,
+    pub wrapped_account_privkey_b64: &'a str,
+    pub initial_vault_name: &'a str,
+    pub initial_vault_blob_b64: &'a str,
+    pub initial_wrapped_vault_key_b64: &'a str,
 }

@@ -35,8 +35,10 @@ struct PersistedSession {
     email: String,
     user_id: String,
     token: String,
-    vault_key_b64: String,
-    last_known_etag: Option<String>,
+    /// Account-level secret. With multi-vault, every per-vault key is
+    /// derived/unwrapped from this — so the persisted session can spin
+    /// back up any vault the user re-opens.
+    master_key_b64: String,
 }
 
 // ----------------------------- Windows impl -----------------------------
@@ -168,8 +170,7 @@ pub fn cloud_persist_session(state: State<'_, AppState>) -> Result<bool, String>
         email: s.email.clone(),
         user_id: s.user_id.clone(),
         token: s.token.clone(),
-        vault_key_b64: B64.encode(s.vault_key.as_bytes()),
-        last_known_etag: s.last_known_etag.clone(),
+        master_key_b64: B64.encode(s.master_key.as_bytes()),
     };
     let json = serde_json::to_string(&payload)
         .map_err(|e| format!("serialize session: {}", e))?;
@@ -195,15 +196,15 @@ pub fn cloud_rehydrate_session(state: State<'_, AppState>) -> Result<bool, Strin
             return Ok(false);
         }
     };
-    let vault_key_bytes = B64
-        .decode(&payload.vault_key_b64)
-        .map_err(|_| "stored vault_key not base64".to_string())?;
-    if vault_key_bytes.len() != 32 {
+    let master_bytes = B64
+        .decode(&payload.master_key_b64)
+        .map_err(|_| "stored master_key not base64".to_string())?;
+    if master_bytes.len() != 32 {
         let _ = imp::clear(&db_path);
         return Ok(false);
     }
     let mut arr = [0u8; 32];
-    arr.copy_from_slice(&vault_key_bytes);
+    arr.copy_from_slice(&master_bytes);
 
     *state
         .cloud
@@ -214,7 +215,6 @@ pub fn cloud_rehydrate_session(state: State<'_, AppState>) -> Result<bool, Strin
         payload.user_id,
         payload.token,
         SecretKey::from_bytes(arr),
-        payload.last_known_etag,
     ));
     Ok(true)
 }

@@ -1,12 +1,16 @@
 <script lang="ts">
   import { Button, Input, Label, toast } from "$lib/ui";
-  import { FolderOpen, Plus, KeyRound, Fingerprint } from "@lucide/svelte";
+  import { FolderOpen, Plus, KeyRound, Fingerprint, FileLock2, Cloud } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { openDatabase, helloAvailable, helloIsEnrolled, helloRetrieve } from "$lib/tauri";
   import { saveLastDatabasePath, addRecentDatabase, getYubikeyHint } from "$lib/storage";
   import CreateDatabaseDialog from "$lib/components/CreateDatabaseDialog.svelte";
   import KdfWarningDialog from "$lib/components/KdfWarningDialog.svelte";
+  import CloudUnlockTab from "$lib/components/CloudUnlockTab.svelte";
+
+  type UnlockTab = "local" | "cloud";
+  let activeTab = $state<UnlockTab>("local");
 
   type Props = {
     initialFilePath?: string | null;
@@ -172,10 +176,33 @@
       <div class="space-y-2">
         <h2 class="text-xl font-semibold tracking-tight">Welcome back</h2>
         <p class="text-sm text-muted-foreground">
-          Open your <code class="font-mono text-xs">.kdbx</code> file and enter your master password.
+          Open a local <code class="font-mono text-xs">.kdbx</code> file or sign in to your cloud account.
         </p>
       </div>
 
+      <!-- Tab switcher: local file vs. cloud -->
+      <div class="flex gap-1 p-1 rounded-md bg-muted/60 text-xs">
+        <button
+          type="button"
+          onclick={() => (activeTab = "local")}
+          class="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-md font-medium transition-colors {activeTab === 'local' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+        >
+          <FileLock2 class="size-3.5" />
+          Local file
+        </button>
+        <button
+          type="button"
+          onclick={() => (activeTab = "cloud")}
+          class="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-md font-medium transition-colors {activeTab === 'cloud' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+        >
+          <Cloud class="size-3.5" />
+          Cloud account
+        </button>
+      </div>
+
+      {#if activeTab === "cloud"}
+        <CloudUnlockTab {onUnlock} />
+      {:else}
       <div class="space-y-4">
         <div class="space-y-1.5">
           <Label for="database">Database file</Label>
@@ -259,6 +286,7 @@
           Create a new database
         </Button>
       </div>
+      {/if}
     </div>
   </main>
 </div>
