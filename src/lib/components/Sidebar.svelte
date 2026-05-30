@@ -1,15 +1,12 @@
 <script lang="ts">
   import GroupTree from "./GroupTree.svelte";
   import {
-    Settings as SettingsIcon,
-    Lock,
-    Database,
-    Home,
-    Star,
-    KeyRound,
+    Settings as SettingsIcon, Lock, Database, Home, Star, KeyRound,
   } from "@lucide/svelte";
   import type { GroupData } from "$lib/tauri";
   import { appState } from "$lib/app-state.svelte";
+  import { IconButton, Eyebrow, Tooltip } from "$lib/ui";
+  import { navRow } from "$lib/ui/recipes";
 
   type Props = {
     rootGroup: GroupData | null;
@@ -44,19 +41,19 @@
   ];
 </script>
 
-<aside class="flex flex-col h-full bg-sidebar min-h-0 border-r border-border/60">
+<aside class="flex flex-col h-full bg-sidebar min-h-0 border-r border-border-subtle">
   <!-- Vault header -->
   <div class="px-3 pt-3 pb-3 shrink-0">
     <div
-      class="flex items-center gap-2.5 rounded-lg bg-background/70 border border-border/70 px-2.5 py-2"
+      class="flex items-center gap-2.5 rounded-lg bg-background/70 border border-border px-2.5 py-2"
       title={appState.dbPath}
     >
       <div class="grid place-items-center size-8 rounded-md bg-primary/15 text-primary shrink-0">
         <Database class="size-4" />
       </div>
       <div class="min-w-0 flex-1">
-        <div class="text-[13px] font-semibold truncate leading-tight">{dbDisplayName}</div>
-        <div class="text-[10.5px] text-muted-foreground flex items-center gap-1.5">
+        <div class="text-sm font-semibold truncate leading-tight">{dbDisplayName}</div>
+        <div class="text-2xs text-muted-foreground flex items-center gap-1.5">
           {#if appState.isDirty}
             <span class="inline-block size-1.5 rounded-full bg-warning animate-pulse-soft"></span>
             <span>Saving…</span>
@@ -76,9 +73,7 @@
       <button
         type="button"
         onclick={() => onSelectGroup(item.id)}
-        class="w-full flex items-center gap-2.5 h-8 px-2.5 rounded-md text-[13px] font-medium transition-colors {active
-          ? 'bg-selected text-selected-foreground'
-          : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground'}"
+        class={navRow({ active, size: "sm" })}
       >
         <item.icon class="size-4 shrink-0" />
         <span class="truncate">{item.label}</span>
@@ -88,9 +83,7 @@
 
   <!-- Folders section -->
   <div class="px-2 pt-2 pb-1 shrink-0">
-    <div class="px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-      Folders
-    </div>
+    <Eyebrow class="px-2">Folders</Eyebrow>
   </div>
 
   <div class="flex-1 min-h-0 overflow-hidden">
@@ -108,25 +101,22 @@
   </div>
 
   <!-- Bottom: Settings + Lock -->
-  <div class="border-t border-border/60 px-2 py-2 flex items-center gap-1.5 shrink-0">
-    <button
-      type="button"
-      onclick={onOpenSettings}
-      class="flex-1 flex items-center gap-2 h-9 px-2.5 rounded-md text-[12.5px] font-medium text-foreground/80 hover:bg-accent/60 hover:text-foreground transition-colors"
-      title="Settings (Ctrl ,)"
-    >
-      <SettingsIcon class="size-4" />
-      <span>Settings</span>
-    </button>
+  <div class="border-t border-border-subtle px-2 py-2 flex items-center gap-1.5 shrink-0">
+    <Tooltip label="Settings" shortcut="Ctrl ,">
+      <button
+        type="button"
+        onclick={onOpenSettings}
+        class="w-full flex items-center gap-2 h-9 px-2.5 rounded-md text-sm font-medium text-foreground/80 hover:bg-accent/60 hover:text-foreground transition-colors"
+      >
+        <SettingsIcon class="size-4" />
+        <span>Settings</span>
+      </button>
+    </Tooltip>
 
-    <button
-      type="button"
-      onclick={() => void onLogout()}
-      class="size-9 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent/60 hover:text-foreground transition-colors"
-      aria-label="Lock database"
-      title="Lock database"
-    >
-      <Lock class="size-4" />
-    </button>
+    <Tooltip label="Lock database">
+      <IconButton onclick={() => void onLogout()} aria-label="Lock database">
+        <Lock />
+      </IconButton>
+    </Tooltip>
   </div>
 </aside>

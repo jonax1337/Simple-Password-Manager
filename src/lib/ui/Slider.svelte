@@ -35,7 +35,7 @@
         class={cn(
           "block size-4 shrink-0 rounded-full border-2 border-primary bg-background shadow-sm transition-colors cursor-grab active:cursor-grabbing",
           "hover:ring-4 hover:ring-primary/20",
-          "focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/30",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
           "disabled:pointer-events-none disabled:opacity-50",
         )}
       />

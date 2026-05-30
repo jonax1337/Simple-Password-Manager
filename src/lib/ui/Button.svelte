@@ -2,12 +2,12 @@
   import { tv, type VariantProps } from "tailwind-variants";
 
   export const buttonVariants = tv({
-    base: "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-150 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] cursor-pointer",
+    base: "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-150 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90",
         destructive:
-          "bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/40 dark:bg-destructive/60",
+          "bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive dark:bg-destructive/60",
         outline:
           "border border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
@@ -18,7 +18,7 @@
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
-        sm: "h-9 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5 text-[12.5px]",
+        sm: "h-9 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5 text-sm",
         lg: "h-9 rounded-md px-6 has-[>svg]:px-4",
         icon: "size-9",
       },

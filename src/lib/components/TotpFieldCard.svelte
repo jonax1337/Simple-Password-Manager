@@ -1,8 +1,9 @@
 <script lang="ts">
   import { Check, Copy } from "@lucide/svelte";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { previewTotp, type TotpPreview } from "$lib/tauri";
-  import { toast } from "$lib/ui";
+  import { IconButton } from "$lib/ui";
+  import { fieldLabel } from "$lib/ui/recipes";
+  import { copyWithFeedback } from "$lib/clipboard";
 
   type Props = { otpUri: string };
   let { otpUri }: Props = $props();
@@ -25,14 +26,10 @@
 
   async function copyCode() {
     if (!preview) return;
-    try {
-      await writeText(preview.code);
-      copied = true;
-      setTimeout(() => (copied = false), 1500);
-      toast.success("Copied", "TOTP code copied");
-    } catch {
-      toast.error("Copy failed");
-    }
+    const ok = await copyWithFeedback(preview.code, "TOTP code", { clearAfter: false });
+    if (!ok) return;
+    copied = true;
+    setTimeout(() => (copied = false), 1500);
   }
 
   const ratio = $derived(preview && preview.period > 0 ? preview.remaining_seconds / preview.period : 0);
@@ -42,9 +39,7 @@
 </script>
 
 <div class="group/field relative rounded-lg border bg-card hover:bg-accent/30 transition-colors px-4 py-2.5">
-  <div class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground mb-0.5">
-    One-time password
-  </div>
+  <div class="{fieldLabel} mb-0.5">One-time password</div>
   <div class="min-h-[18px] flex items-center gap-3">
     {#if preview}
       <span class="font-mono text-base tracking-widest tabular-nums">
@@ -74,18 +69,16 @@
     {/if}
   </div>
   {#if preview}
-    <button
-      type="button"
+    <IconButton
+      size="sm"
+      tone="muted"
+      softReveal
       onclick={copyCode}
-      class="absolute right-2 top-1/2 -translate-y-1/2 size-7 inline-flex items-center justify-center rounded-md opacity-0 group-hover/field:opacity-100 transition-opacity hover:bg-muted text-muted-foreground hover:text-foreground"
       aria-label="Copy code"
       title="Copy code"
+      class="absolute right-2 top-1/2 -translate-y-1/2"
     >
-      {#if copied}
-        <Check class="size-3.5 text-success" />
-      {:else}
-        <Copy class="size-3.5" />
-      {/if}
-    </button>
+      {#if copied}<Check class="text-success" />{:else}<Copy />{/if}
+    </IconButton>
   {/if}
 </div>

@@ -2,7 +2,7 @@
   import { Button, Input, Label } from "$lib/ui";
   import { Check, Copy, KeyRound, Trash2 } from "@lucide/svelte";
   import { previewTotp, type TotpPreview, type EntryData, type CustomField } from "$lib/tauri";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { copyWithFeedback } from "$lib/clipboard";
 
   type Props = {
     formData: EntryData;
@@ -92,7 +92,8 @@
   async function copyCode() {
     const code = savedCode?.code ?? preview?.code;
     if (!code) return;
-    await writeText(code);
+    const ok = await copyWithFeedback(code, "TOTP code", { clearAfter: false });
+    if (!ok) return;
     copied = true;
     setTimeout(() => (copied = false), 1200);
   }
@@ -127,7 +128,7 @@
               fill="none"
             />
           </svg>
-          <span class="absolute inset-0 flex items-center justify-center text-[10px] font-medium tabular-nums {urgent ? 'text-destructive' : ''}">
+          <span class="absolute inset-0 flex items-center justify-center text-2xs font-medium tabular-nums {urgent ? 'text-destructive' : ''}">
             {savedCode.remaining_seconds}
           </span>
         </div>

@@ -1,24 +1,17 @@
 <script lang="ts">
-  import { Button, Dialog, Input, Label, DropdownMenu, DropdownItem, DropdownSeparator, toast } from "$lib/ui";
+  import {
+    Button, Dialog, Input, Label, DropdownMenu, DropdownItem, DropdownSeparator,
+    ContextMenu, IconButton, SearchInput, Tooltip, EmptyState, toast,
+  } from "$lib/ui";
   import IconPicker from "./IconPicker.svelte";
   import DynamicIcon from "./DynamicIcon.svelte";
   import {
-    Plus,
-    Copy,
-    Trash2,
-    Star,
-    MoreHorizontal,
-    ExternalLink,
-    Search,
-    ArrowUpDown,
-    CheckSquare,
-    X,
-    Check,
-    GripVertical,
+    Plus, Copy, Trash2, Star, MoreHorizontal, ExternalLink, ArrowUpDown,
+    CheckSquare, X, Check, GripVertical, KeyRound,
   } from "@lucide/svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { open as openShell } from "@tauri-apps/plugin-shell";
+  import { copyWithFeedback } from "$lib/clipboard";
+  import { openUrl } from "$lib/url";
   import { getEntries, createEntry, deleteEntry, updateEntry, type EntryData } from "$lib/tauri";
   import { undoStack } from "$lib/undo-stack.svelte";
   import { appState } from "$lib/app-state.svelte";
@@ -35,6 +28,9 @@
     rootGroupUuid?: string;
     selectedGroupName?: string;
     selectedEntryUuid?: string | null;
+    // Monotonic counter bumped from MainApp (palette / Ctrl+N) to ask us
+    // to open the create dialog. Each bump triggers a single open.
+    createTrigger?: number;
     onSelectEntry: (uuid: string) => void;
     onEntryCreated?: (uuid: string) => void;
   };
@@ -48,6 +44,7 @@
     rootGroupUuid,
     selectedGroupName,
     selectedEntryUuid = null,
+    createTrigger = 0,
     onSelectEntry,
     onEntryCreated,
   }: Props = $props();
@@ -91,6 +88,17 @@
     void groupUuid;
     void isFavoritesView;
     selection = new Set();
+  });
+
+  // React to parent-initiated "open create dialog" requests. The first
+  // value (0) is the initial mount — only respond to subsequent bumps.
+  let lastCreateTrigger = -1;
+  $effect(() => {
+    if (createTrigger === lastCreateTrigger) return;
+    const seen = lastCreateTrigger;
+    lastCreateTrigger = createTrigger;
+    if (seen === -1) return; // skip initial mount
+    if (canCreate) showCreate = true;
   });
 
   const filtered = $derived.by(() => {
@@ -176,8 +184,15 @@
     }
   }
 
+  // Resolve where to drop a newly-created entry:
+  //   folder view  → the selected folder
+  //   Favorites/All → root group (favorites are virtual; All Items has no
+  //                   single owning folder, so root is the sensible default)
+  const createTarget = $derived(groupUuid || rootGroupUuid);
+  const canCreate = $derived(Boolean(createTarget));
+
   async function handleCreate() {
-    const target = isFavoritesView ? rootGroupUuid : groupUuid;
+    const target = createTarget;
     if (!newTitle.trim() || !target) return;
     try {
       const entryUuid = crypto.randomUUID();
@@ -213,17 +228,6 @@
       onSelectEntry(entryUuid);
     } catch (e) {
       toast.error("Error", String(e));
-    }
-  }
-
-  async function copy(text: string, label: string) {
-    if (!text) return;
-    try {
-      await writeText(text);
-      toast.success("Copied", `${label} copied to clipboard`);
-      setTimeout(() => void writeText(""), 30000);
-    } catch {
-      toast.error("Copy failed");
     }
   }
 
@@ -265,16 +269,6 @@
     }
   }
 
-  async function openUrl(url: string) {
-    if (!url) return;
-    try {
-      const full = url.match(/^https?:\/\//) ? url : `https://${url}`;
-      await openShell(full);
-    } catch {
-      toast.error("Failed to open URL");
-    }
-  }
-
   const allChecked = $derived(filtered.length > 0 && selection.size === filtered.length);
 
   // Deterministic tile tint per entry — keeps the list colorful like 1P,
@@ -296,11 +290,37 @@
   }
 </script>
 
+{#snippet entryMenuItems(entry: EntryData)}
+  <DropdownItem onSelect={() => copyWithFeedback(entry.username, "Username")} disabled={!entry.username}>
+    <Copy class="size-4" />
+    <span>Copy username</span>
+  </DropdownItem>
+  <DropdownItem onSelect={() => copyWithFeedback(entry.password, "Password")} disabled={!entry.password}>
+    <Copy class="size-4" />
+    <span>Copy password</span>
+  </DropdownItem>
+  {#if entry.url}
+    <DropdownItem onSelect={() => openUrl(entry.url)}>
+      <ExternalLink class="size-4" />
+      <span>Open URL</span>
+    </DropdownItem>
+  {/if}
+  <DropdownItem onSelect={() => toggleFavorite(entry)}>
+    <Star class="size-4" />
+    <span>{entry.is_favorite ? "Unfavorite" : "Favorite"}</span>
+  </DropdownItem>
+  <DropdownSeparator />
+  <DropdownItem destructive onSelect={() => handleDelete(entry)}>
+    <Trash2 class="size-4" />
+    <span>Delete</span>
+  </DropdownItem>
+{/snippet}
+
 <div class="flex h-full flex-col bg-list">
   <div class="shrink-0">
     <div class="flex items-center justify-between px-4 pt-4 pb-2 gap-2">
       <div class="min-w-0 flex-1">
-        <h2 class="text-[15px] font-semibold tracking-tight truncate" title={selectedGroupName ?? ""}>
+        <h2 class="text-md font-semibold tracking-tight truncate" title={selectedGroupName ?? ""}>
           {#if isFavoritesView}
             Favorites
           {:else if selectedGroupName}
@@ -309,7 +329,7 @@
             All Items
           {/if}
         </h2>
-        <p class="text-[11px] text-muted-foreground mt-0.5">
+        <p class="text-2xs text-muted-foreground mt-0.5">
           {filtered.length}
           {filtered.length === 1 ? "item" : "items"}{filter ? ` · filtered from ${entries.length}` : ""}
         </p>
@@ -317,14 +337,11 @@
       <div class="flex items-center gap-0.5 shrink-0">
         <DropdownMenu align="end">
           {#snippet trigger()}
-            <button
-              type="button"
-              class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Sort"
-              title="Sort"
-            >
-              <ArrowUpDown class="size-3.5" />
-            </button>
+            <Tooltip label="Sort">
+              <IconButton aria-label="Sort">
+                <ArrowUpDown class="size-3.5" />
+              </IconButton>
+            </Tooltip>
           {/snippet}
           <DropdownItem onSelect={() => toggleSort("title")}>
             {#if sortKey === "title"}{sortDir === "asc" ? "↑" : "↓"}{/if}
@@ -344,40 +361,22 @@
           </DropdownItem>
         </DropdownMenu>
 
-        {#if !isSearching && (groupUuid || isFavoritesView)}
-          <button
-            type="button"
-            class="size-9 inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs"
-            onclick={() => (showCreate = true)}
-            title="New item"
-            aria-label="New item"
-          >
-            <Plus class="size-4" />
-          </button>
+        {#if canCreate}
+          <Tooltip label="New item" shortcut="Ctrl N">
+            <IconButton
+              tone="primary"
+              onclick={() => (showCreate = true)}
+              aria-label="New item"
+            >
+              <Plus />
+            </IconButton>
+          </Tooltip>
         {/if}
       </div>
     </div>
 
     <div class="px-4 pb-3">
-      <div class="relative">
-        <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-        <input
-          type="text"
-          bind:value={filter}
-          placeholder="Filter…"
-          class="h-9 w-full rounded-md border border-input bg-background/70 pl-8 pr-7 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-ring/40 focus-visible:ring-2 transition-shadow"
-        />
-        {#if filter}
-          <button
-            type="button"
-            onclick={() => (filter = "")}
-            aria-label="Clear filter"
-            class="absolute right-1.5 top-1/2 -translate-y-1/2 size-5 inline-flex items-center justify-center rounded hover:bg-accent text-muted-foreground"
-          >
-            <X class="size-3" />
-          </button>
-        {/if}
-      </div>
+      <SearchInput bind:value={filter} placeholder="Filter…" />
     </div>
 
     {#if selection.size > 0}
@@ -403,15 +402,45 @@
     {/if}
   </div>
 
-  <div class="flex-1 overflow-y-auto">
+  <ContextMenu>
+    {#snippet trigger({ props })}
+      <div {...props} class="flex-1 overflow-y-auto">
     {#if filtered.length === 0}
-      <div class="flex h-40 items-center justify-center text-[12.5px] text-muted-foreground text-center px-6">
-        {#if entries.length === 0}
-          {isFavoritesView ? "No favorites yet" : groupUuid ? "No items here yet" : "Pick a folder to see items"}
-        {:else}
-          No items match "{filter}"
-        {/if}
-      </div>
+      {#if entries.length === 0}
+        <!-- Empty folder / view — encourage action with a CTA. -->
+        <EmptyState
+          tone="prompt"
+          icon={isFavoritesView ? Star : KeyRound}
+          title={isFavoritesView ? "No favorites yet" : groupUuid ? "Nothing here yet" : "Pick a folder"}
+          description={isFavoritesView
+            ? "Star an entry from any folder to pin it here for quick access."
+            : groupUuid
+              ? "Add your first entry to start organising credentials in this folder."
+              : "Choose a folder from the sidebar to see its items."}
+        >
+          {#if canCreate}
+            <Button size="sm" onclick={() => (showCreate = true)}>
+              <Plus class="size-3.5" />
+              New item
+            </Button>
+          {/if}
+        </EmptyState>
+      {:else}
+        <!-- Text-only no-results state — illustrations grow stale here. -->
+        <EmptyState
+          tone="no-results"
+          title="No matches"
+          description={`Nothing matches "${filter}".`}
+        >
+          <button
+            type="button"
+            class="text-2xs text-primary hover:underline"
+            onclick={() => (filter = "")}
+          >
+            Clear filter
+          </button>
+        </EmptyState>
+      {/if}
     {:else}
       <ul class="px-2 py-1.5">
         {#each filtered as entry (entry.uuid)}
@@ -421,7 +450,10 @@
           {@const tint = tileTint(entry.uuid)}
           {@const selectionActive = selection.size > 0}
           <li>
+            <ContextMenu>
+            {#snippet trigger({ props })}
             <div
+              {...props}
               role="button"
               tabindex="0"
               draggable={true}
@@ -478,77 +510,66 @@
 
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-1.5">
-                  <span class="text-[13.5px] font-semibold truncate">{entry.title || "(untitled)"}</span>
+                  <span class="text-sm font-semibold truncate">{entry.title || "(untitled)"}</span>
                   {#if entry.is_favorite}
                     <Star class="size-3 text-warning fill-warning shrink-0" />
                   {/if}
                 </div>
                 {#if entry.username}
-                  <div class="text-[11.5px] truncate text-muted-foreground mt-0.5">{entry.username}</div>
+                  <div class="text-xs truncate text-muted-foreground mt-0.5">{entry.username}</div>
                 {:else if entry.url}
-                  <div class="text-[11.5px] truncate text-muted-foreground mt-0.5">{entry.url}</div>
+                  <div class="text-xs truncate text-muted-foreground mt-0.5">{entry.url}</div>
                 {/if}
               </div>
 
-              <div class="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 transition-opacity shrink-0">
+              <div class="flex items-center gap-0.5 opacity-60 group-hover/row:opacity-100 data-[state=open]:opacity-100 transition-opacity shrink-0">
                 <!-- Drag handle indicator (visual cue only; the whole row is the drag source). -->
                 <span class="text-muted-foreground/50 px-0.5" title="Drag to move">
                   <GripVertical class="size-4" />
                 </span>
-                <button
-                  type="button"
-                  class="size-7 inline-flex items-center justify-center rounded hover:bg-foreground/8 text-muted-foreground hover:text-foreground"
+                <IconButton
+                  size="sm"
+                  tone="soft"
                   title="Copy password"
                   disabled={!entry.password}
                   onclick={(e: MouseEvent) => {
                     e.stopPropagation();
-                    copy(entry.password, "Password");
+                    copyWithFeedback(entry.password, "Password");
                   }}
                 >
-                  <Copy class="size-3.5" />
-                </button>
+                  <Copy />
+                </IconButton>
                 <DropdownMenu align="end">
                   {#snippet trigger()}
-                    <button
-                      type="button"
-                      class="size-7 inline-flex items-center justify-center rounded hover:bg-foreground/8 text-muted-foreground hover:text-foreground"
+                    <IconButton
+                      size="sm"
+                      tone="soft"
                       aria-label="Entry actions"
                       onclick={(e: MouseEvent) => e.stopPropagation()}
                     >
-                      <MoreHorizontal class="size-3.5" />
-                    </button>
+                      <MoreHorizontal />
+                    </IconButton>
                   {/snippet}
-                  <DropdownItem onSelect={() => copy(entry.username, "Username")} disabled={!entry.username}>
-                    <Copy class="size-4" />
-                    <span>Copy username</span>
-                  </DropdownItem>
-                  <DropdownItem onSelect={() => copy(entry.password, "Password")} disabled={!entry.password}>
-                    <Copy class="size-4" />
-                    <span>Copy password</span>
-                  </DropdownItem>
-                  {#if entry.url}
-                    <DropdownItem onSelect={() => openUrl(entry.url)}>
-                      <ExternalLink class="size-4" />
-                      <span>Open URL</span>
-                    </DropdownItem>
-                  {/if}
-                  <DropdownItem onSelect={() => toggleFavorite(entry)}>
-                    <Star class="size-4" />
-                    <span>{entry.is_favorite ? "Unfavorite" : "Favorite"}</span>
-                  </DropdownItem>
-                  <DropdownSeparator />
-                  <DropdownItem destructive onSelect={() => handleDelete(entry)}>
-                    <Trash2 class="size-4" />
-                    <span>Delete</span>
-                  </DropdownItem>
+                  {@render entryMenuItems(entry)}
                 </DropdownMenu>
               </div>
             </div>
+            {/snippet}
+            {@render entryMenuItems(entry)}
+            </ContextMenu>
           </li>
         {/each}
       </ul>
     {/if}
-  </div>
+      </div>
+    {/snippet}
+    {#if canCreate}
+      <DropdownItem onSelect={() => (showCreate = true)}>
+        <Plus class="size-4" />
+        <span>New entry</span>
+      </DropdownItem>
+    {/if}
+  </ContextMenu>
 </div>
 
 <Dialog bind:open={showCreate} title="Create New Item" description="Add a new entry to this folder">

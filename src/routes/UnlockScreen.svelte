@@ -145,19 +145,19 @@
 <!-- Two-panel unlock — branding on the left, form on the right (collapses on narrow). -->
 <div class="flex h-full w-full overflow-hidden bg-background">
   <!-- Brand panel -->
-  <aside class="hidden lg:flex w-[44%] max-w-[520px] flex-col justify-center p-12 border-r border-border/60 bg-sidebar">
+  <aside class="hidden lg:flex w-[44%] max-w-[520px] flex-col justify-center p-12 border-r border-border-subtle bg-sidebar">
     <div class="space-y-6">
       <img src="/app-icon.png" alt="" aria-hidden="true" class="size-20 object-contain" />
       <div class="space-y-3">
-        <h1 class="text-[34px] font-semibold tracking-tight leading-[1.1]">
+        <h1 class="text-4xl font-semibold tracking-tight leading-[1.1]">
           Your vault,<br/>locked &amp; loaded.
         </h1>
-        <p class="text-[13.5px] text-muted-foreground leading-relaxed max-w-[360px]">
+        <p class="text-sm text-muted-foreground leading-relaxed max-w-[360px]">
           Unlock your KeePass database to access every saved item, generate strong passwords,
           and keep your accounts in order — all stored locally on your machine.
         </p>
       </div>
-      <div class="text-[11px] text-muted-foreground/80 pt-4 border-t border-border/40">
+      <div class="text-2xs text-muted-foreground/80 pt-4 border-t border-border-subtle">
         <p class="flex items-center gap-1.5">
           <span class="size-1.5 rounded-full bg-success/70"></span>
           End-to-end encrypted — your master password never leaves this device.
@@ -170,9 +170,9 @@
   <main class="flex-1 grid place-items-center px-6 py-10 overflow-y-auto">
     <div class="w-full max-w-[400px] space-y-7">
       <div class="space-y-2">
-        <h2 class="text-[22px] font-semibold tracking-tight">Welcome back</h2>
-        <p class="text-[13px] text-muted-foreground">
-          Open your <code class="font-mono text-[12px]">.kdbx</code> file and enter your master password.
+        <h2 class="text-xl font-semibold tracking-tight">Welcome back</h2>
+        <p class="text-sm text-muted-foreground">
+          Open your <code class="font-mono text-xs">.kdbx</code> file and enter your master password.
         </p>
       </div>
 
@@ -185,13 +185,13 @@
             class="group/file w-full flex items-center gap-2.5 h-9 rounded-md border border-input bg-card hover:bg-accent/30 px-3 transition-colors text-left"
           >
             <FolderOpen class="size-4 text-muted-foreground shrink-0" />
-            <span class="flex-1 min-w-0 text-[13px] truncate {fileLabel ? '' : 'text-muted-foreground'}">
+            <span class="flex-1 min-w-0 text-sm truncate {fileLabel ? '' : 'text-muted-foreground'}">
               {fileLabel || "Choose a .kdbx file…"}
             </span>
-            <span class="text-[11px] text-muted-foreground group-hover/file:text-foreground transition-colors">Browse</span>
+            <span class="text-2xs text-muted-foreground group-hover/file:text-foreground transition-colors">Browse</span>
           </button>
           {#if filePath}
-            <p class="text-[10.5px] text-muted-foreground/80 truncate font-mono px-1" title={filePath}>{filePath}</p>
+            <p class="text-2xs text-muted-foreground/80 truncate font-mono px-1" title={filePath}>{filePath}</p>
           {/if}
         </div>
 
@@ -209,7 +209,7 @@
         {#if yubikeyHint}
           <div class="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
             <KeyRound class="mt-0.5 size-4 text-primary shrink-0" />
-            <div class="text-[12px] leading-relaxed">
+            <div class="text-xs leading-relaxed">
               <p class="font-medium">Yubikey required</p>
               <p class="text-muted-foreground">
                 Plug in serial #{yubikeyHint.serial_number} and touch it when prompted.
@@ -250,7 +250,7 @@
         <div class="relative my-2">
           <div class="absolute inset-0 flex items-center"><span class="w-full border-t"></span></div>
           <div class="relative flex justify-center">
-            <span class="bg-background px-3 text-[10px] uppercase tracking-wider text-muted-foreground">Or</span>
+            <span class="bg-background px-3 text-2xs uppercase tracking-wider text-muted-foreground">Or</span>
           </div>
         </div>
 

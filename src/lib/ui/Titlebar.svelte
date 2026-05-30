@@ -28,7 +28,7 @@
 
 <header
   data-tauri-drag-region
-  class="titlebar select-none flex items-center h-9 shrink-0 bg-sidebar border-b border-border/60 text-foreground"
+  class="titlebar select-none flex items-center h-9 shrink-0 bg-sidebar border-b border-border-subtle text-foreground"
 >
   {#if showAppMark}
     <div data-tauri-drag-region class="flex items-center pl-3 pr-3">
@@ -40,7 +40,7 @@
 
   <div
     data-tauri-drag-region
-    class="flex-1 flex items-center gap-3 text-[11.5px] font-medium text-muted-foreground tracking-tight min-w-0"
+    class="flex-1 flex items-center gap-3 text-xs font-medium text-muted-foreground tracking-tight min-w-0"
   >
     <span class="truncate">{title}</span>
     {@render children?.()}

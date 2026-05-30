@@ -74,6 +74,11 @@
   let settingsOpen = $state(false);
   let aboutOpen = $state(false);
 
+  // Bumped from the command palette / Ctrl+N to ask EntryList to open its
+  // create dialog. A monotonic counter lets the child react on every press
+  // without us having to clear an explicit flag.
+  let createTrigger = $state(0);
+
   let initialExpanded: Set<string> | undefined = $state(undefined);
 
   const isDashboardView = $derived(selectedUuid === "_dashboard");
@@ -264,6 +269,17 @@
     }
   }
 
+  async function handleNewEntry() {
+    // From Home the list isn't visible — bounce to All Items first so the
+    // user can see the result of the create flow.
+    if (isDashboardView) {
+      await selectGroup("_all");
+      // Wait one tick so EntryList mounts before we bump the trigger.
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    createTrigger++;
+  }
+
   async function handleUndo() {
     const desc = await undoStack.undo();
     if (desc) {
@@ -340,6 +356,10 @@
     } else if (mod && e.key === ",") {
       e.preventDefault();
       settingsOpen = true;
+    } else if (mod && e.key.toLowerCase() === "n") {
+      if (isEditable(e.target)) return;
+      e.preventDefault();
+      void handleNewEntry();
     }
   }
 
@@ -359,6 +379,7 @@
   }
 
   const actionCommands: PaletteCommand[] = $derived([
+    { id: "act-new-entry", label: "New entry", section: "Actions", icon: KeyRound, keywords: "create add new entry password", hint: "Ctrl N", onSelect: handleNewEntry },
     { id: "go-home", label: "Go to Home", section: "Navigate", icon: Home, keywords: "home dashboard", onSelect: () => selectGroup("_dashboard") },
     { id: "go-all", label: "Go to All Items", section: "Navigate", icon: KeyRound, onSelect: () => selectGroup("_all") },
     { id: "go-favorites", label: "Go to Favorites", section: "Navigate", icon: Star, onSelect: () => selectGroup("_favorites") },
@@ -454,6 +475,7 @@
               rootGroupUuid={rootGroup?.uuid}
               selectedGroupName={groupName}
               {selectedEntryUuid}
+              {createTrigger}
               onSelectEntry={(uuid) => (selectedEntryUuid = uuid)}
               onEntryCreated={(uuid) => (selectedEntryUuid = uuid)}
             />

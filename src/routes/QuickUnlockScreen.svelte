@@ -136,8 +136,8 @@
       <div class="flex flex-col items-center text-center space-y-3">
         <img src="/app-icon.png" alt="" aria-hidden="true" class="size-14 object-contain" />
         <div>
-          <h2 class="text-[18px] font-semibold tracking-tight">{dbName}</h2>
-          <p class="text-[11px] text-muted-foreground truncate max-w-[300px]" title={lastDatabasePath}>
+          <h2 class="text-lg font-semibold tracking-tight">{dbName}</h2>
+          <p class="text-2xs text-muted-foreground truncate max-w-[300px]" title={lastDatabasePath}>
             {lastDatabasePath}
           </p>
         </div>
@@ -160,7 +160,7 @@
         {#if yubikeyHint}
           <div class="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-primary/5 p-3">
             <KeyRound class="mt-0.5 size-4 text-primary shrink-0" />
-            <div class="text-[12px] leading-relaxed">
+            <div class="text-xs leading-relaxed">
               <p class="font-medium">Yubikey required</p>
               <p class="text-muted-foreground">
                 Plug in serial #{yubikeyHint.serial_number} and touch when prompted.
@@ -200,7 +200,7 @@
         type="button"
         onclick={onCancel}
         disabled={loading}
-        class="text-[11.5px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        class="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
       >
         Open a different database
       </button>

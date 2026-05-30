@@ -1,31 +1,20 @@
 <script lang="ts">
-  import { Button, Input, Textarea, Label, Checkbox, Select, toast, DropdownMenu, DropdownItem, DropdownSeparator } from "$lib/ui";
+  import {
+    Button, Input, Textarea, Label, Checkbox, Select, toast,
+    DropdownMenu, DropdownItem, DropdownSeparator,
+    IconButton, Eyebrow, FieldRow, Tooltip,
+  } from "$lib/ui";
   import IconPicker from "./IconPicker.svelte";
   import DynamicIcon from "./DynamicIcon.svelte";
   import PasswordStrengthMeter from "./PasswordStrengthMeter.svelte";
   import TotpSection from "./TotpSection.svelte";
   import TotpFieldCard from "./TotpFieldCard.svelte";
   import {
-    Eye,
-    EyeOff,
-    Copy,
-    Check,
-    Save,
-    Shield,
-    Plus,
-    Trash2,
-    X,
-    Star,
-    ExternalLink,
-    Pencil,
-    MoreHorizontal,
-    Tag,
-    Clock,
-    Calendar,
-    History,
+    Eye, EyeOff, Copy, Save, Shield, Plus, Trash2, X, Star,
+    ExternalLink, Pencil, MoreHorizontal, Tag, Clock, Calendar, History,
   } from "@lucide/svelte";
-  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { open as openShell } from "@tauri-apps/plugin-shell";
+  import { copyWithFeedback } from "$lib/clipboard";
+  import { openUrl } from "$lib/url";
   import {
     getEntry,
     updateEntry,
@@ -76,17 +65,10 @@
   let editingFieldIndex = $state<number | null>(null);
   let editingField = $state<CustomField | null>(null);
 
-  // Per-row "copied" flashes for the read-mode login card
-  let copiedUsername = $state(false);
-  let copiedPassword = $state(false);
-  let copiedUrl = $state(false);
-  let revealReadPassword = $state(false);
-
   $effect(() => {
     void uuid;
     loaded = false;
     editing = false;
-    revealReadPassword = false;
     if (uuid) void load(uuid);
   });
 
@@ -229,38 +211,6 @@
     }
   }
 
-  async function openCurrentUrl() {
-    const url = (editing ? formData.url : entry.url) || "";
-    if (!url) return;
-    try {
-      const full = url.match(/^https?:\/\//) ? url : `https://${url}`;
-      await openShell(full);
-    } catch {
-      toast.error("Failed to open URL");
-    }
-  }
-
-  async function copyValue(value: string, label: string, kind?: "username" | "password" | "url") {
-    if (!value) return;
-    try {
-      await writeText(value);
-      if (kind === "username") {
-        copiedUsername = true;
-        setTimeout(() => (copiedUsername = false), 1500);
-      } else if (kind === "password") {
-        copiedPassword = true;
-        setTimeout(() => (copiedPassword = false), 1500);
-      } else if (kind === "url") {
-        copiedUrl = true;
-        setTimeout(() => (copiedUrl = false), 1500);
-      }
-      toast.success("Copied", `${label} copied to clipboard`);
-      setTimeout(() => void writeText(""), 30000);
-    } catch {
-      toast.error("Copy failed");
-    }
-  }
-
   async function handleDeleteEntry() {
     const ok = await ask(`Delete "${entry.title}"? You can undo with Ctrl+Z.`, {
       kind: "warning",
@@ -359,8 +309,6 @@
       .map((t) => t.trim())
       .filter(Boolean),
   );
-
-  const passwordMask = $derived(entry.password ? "•".repeat(Math.min(entry.password.length, 14)) : "");
 </script>
 
 <div class="flex h-full flex-col bg-background">
@@ -373,57 +321,49 @@
             <DynamicIcon iconId={entry.icon_id ?? 0} class="size-9" />
           </div>
           <div class="min-w-0 flex-1 pt-1">
-            <h1 class="text-[26px] font-semibold tracking-tight truncate leading-tight">
+            <h1 class="text-2xl font-semibold tracking-tight truncate leading-tight">
               {entry.title || "Untitled"}
             </h1>
-            <p class="text-[12.5px] text-muted-foreground mt-1 truncate">
+            <p class="text-sm text-muted-foreground mt-1 truncate">
               {entry.username || entry.url || "—"}
             </p>
           </div>
           <div class="flex items-center gap-1 shrink-0 -mt-1">
-            <button
-              type="button"
-              onclick={toggleFavorite}
-              title={entry.is_favorite ? "Unfavorite" : "Favorite"}
-              class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label={entry.is_favorite ? "Unfavorite" : "Favorite"}
-            >
-              {#if entry.is_favorite}
-                <Star class="size-4 text-warning fill-warning" />
-              {:else}
-                <Star class="size-4" />
-              {/if}
-            </button>
+            <Tooltip label={entry.is_favorite ? "Unfavorite" : "Favorite"}>
+              <IconButton
+                onclick={toggleFavorite}
+                aria-label={entry.is_favorite ? "Unfavorite" : "Favorite"}
+              >
+                <Star class={entry.is_favorite ? "text-warning fill-warning" : ""} />
+              </IconButton>
+            </Tooltip>
             <button
               type="button"
               onclick={startEdit}
-              title="Edit"
-              class="h-9 px-3 inline-flex items-center gap-1.5 rounded-md bg-primary/10 hover:bg-primary/15 text-primary text-[12.5px] font-medium transition-colors"
+              class="h-9 px-3 inline-flex items-center gap-1.5 rounded-md bg-primary/10 hover:bg-primary/15 text-primary text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Pencil class="size-3.5" />
               <span>Edit</span>
             </button>
             <DropdownMenu align="end">
               {#snippet trigger()}
-                <button
-                  type="button"
-                  class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="More actions"
-                >
-                  <MoreHorizontal class="size-4" />
-                </button>
+                <Tooltip label="More actions">
+                  <IconButton aria-label="More actions">
+                    <MoreHorizontal />
+                  </IconButton>
+                </Tooltip>
               {/snippet}
               {#if entry.url}
-                <DropdownItem onSelect={openCurrentUrl}>
+                <DropdownItem onSelect={() => openUrl(entry.url)}>
                   <ExternalLink class="size-4" />
                   <span>Open URL</span>
                 </DropdownItem>
               {/if}
-              <DropdownItem onSelect={() => copyValue(entry.username, "Username", "username")} disabled={!entry.username}>
+              <DropdownItem onSelect={() => copyWithFeedback(entry.username, "Username")} disabled={!entry.username}>
                 <Copy class="size-4" />
                 <span>Copy username</span>
               </DropdownItem>
-              <DropdownItem onSelect={() => copyValue(entry.password, "Password", "password")} disabled={!entry.password}>
+              <DropdownItem onSelect={() => copyWithFeedback(entry.password, "Password")} disabled={!entry.password}>
                 <Copy class="size-4" />
                 <span>Copy password</span>
               </DropdownItem>
@@ -434,15 +374,11 @@
               </DropdownItem>
             </DropdownMenu>
             {#if onClose}
-              <button
-                type="button"
-                onclick={onClose}
-                title="Close"
-                class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Close"
-              >
-                <X class="size-4" />
-              </button>
+              <Tooltip label="Close">
+                <IconButton onclick={onClose} aria-label="Close">
+                  <X />
+                </IconButton>
+              </Tooltip>
             {/if}
           </div>
         </div>
@@ -452,102 +388,11 @@
         <div class="max-w-2xl mx-auto space-y-3">
           <!-- LOGIN DETAILS card with hairline-divided sub-rows (1P style) -->
           <div class="rounded-lg border bg-card shadow-xs overflow-hidden">
-            <div class="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/60 bg-muted/30">
-              Login details
-            </div>
-            <div class="divide-y divide-border/60">
-              <!-- Username -->
-              <div class="group/row relative px-4 py-2.5 hover:bg-accent/30 transition-colors">
-                <div class="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80 mb-0.5">Username</div>
-                <div class="text-[13.5px] break-all pr-9 min-h-[18px]">
-                  {#if entry.username}
-                    {entry.username}
-                  {:else}
-                    <span class="text-muted-foreground/50 italic text-xs">empty</span>
-                  {/if}
-                </div>
-                {#if entry.username}
-                  <button
-                    type="button"
-                    onclick={() => copyValue(entry.username, "Username", "username")}
-                    class="absolute right-2 top-1/2 -translate-y-1/2 size-7 inline-flex items-center justify-center rounded-md opacity-0 group-hover/row:opacity-100 transition-opacity hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
-                    aria-label="Copy username"
-                    title="Copy username"
-                  >
-                    {#if copiedUsername}<Check class="size-3.5 text-success" />{:else}<Copy class="size-3.5" />{/if}
-                  </button>
-                {/if}
-              </div>
-
-              <!-- Password -->
-              <div class="group/row relative px-4 py-2.5 hover:bg-accent/30 transition-colors">
-                <div class="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80 mb-0.5">Password</div>
-                <div class="text-[13.5px] font-mono break-all pr-16 min-h-[18px]">
-                  {#if entry.password}
-                    {revealReadPassword ? entry.password : passwordMask}
-                  {:else}
-                    <span class="text-muted-foreground/50 italic text-xs font-sans">empty</span>
-                  {/if}
-                </div>
-                {#if entry.password}
-                  <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-                    <button
-                      type="button"
-                      onclick={() => (revealReadPassword = !revealReadPassword)}
-                      class="size-7 inline-flex items-center justify-center rounded-md opacity-0 group-hover/row:opacity-100 transition-opacity hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
-                      aria-label={revealReadPassword ? "Hide password" : "Reveal password"}
-                      title={revealReadPassword ? "Hide" : "Reveal"}
-                    >
-                      {#if revealReadPassword}<EyeOff class="size-3.5" />{:else}<Eye class="size-3.5" />{/if}
-                    </button>
-                    <button
-                      type="button"
-                      onclick={() => copyValue(entry.password, "Password", "password")}
-                      class="size-7 inline-flex items-center justify-center rounded-md opacity-0 group-hover/row:opacity-100 transition-opacity hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
-                      aria-label="Copy password"
-                      title="Copy password"
-                    >
-                      {#if copiedPassword}<Check class="size-3.5 text-success" />{:else}<Copy class="size-3.5" />{/if}
-                    </button>
-                  </div>
-                {/if}
-              </div>
-
-              <!-- Website -->
-              <div class="group/row relative px-4 py-2.5 hover:bg-accent/30 transition-colors">
-                <div class="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80 mb-0.5">Website</div>
-                <div class="text-[13.5px] break-all pr-16 min-h-[18px]">
-                  {#if entry.url}
-                    <button type="button" onclick={openCurrentUrl} class="text-primary hover:underline text-left">
-                      {entry.url}
-                    </button>
-                  {:else}
-                    <span class="text-muted-foreground/50 italic text-xs">empty</span>
-                  {/if}
-                </div>
-                {#if entry.url}
-                  <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-                    <button
-                      type="button"
-                      onclick={openCurrentUrl}
-                      class="size-7 inline-flex items-center justify-center rounded-md opacity-0 group-hover/row:opacity-100 transition-opacity hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
-                      aria-label="Open URL"
-                      title="Open"
-                    >
-                      <ExternalLink class="size-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onclick={() => copyValue(entry.url, "URL", "url")}
-                      class="size-7 inline-flex items-center justify-center rounded-md opacity-0 group-hover/row:opacity-100 transition-opacity hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
-                      aria-label="Copy URL"
-                      title="Copy URL"
-                    >
-                      {#if copiedUrl}<Check class="size-3.5 text-success" />{:else}<Copy class="size-3.5" />{/if}
-                    </button>
-                  </div>
-                {/if}
-              </div>
+            <Eyebrow class="px-4 py-2 border-b border-border-subtle bg-muted/30">Login details</Eyebrow>
+            <div class="divide-y divide-border-subtle">
+              <FieldRow variant="bare" label="Username" value={entry.username} copyLabel="Username" />
+              <FieldRow variant="bare" label="Password" value={entry.password} kind="password" copyLabel="Password" />
+              <FieldRow variant="bare" label="Website" value={entry.url} kind="url" copyLabel="URL" />
             </div>
           </div>
 
@@ -557,44 +402,24 @@
 
           {#if entry.notes}
             <div class="rounded-lg border bg-card shadow-xs px-4 py-3">
-              <div class="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80 mb-1.5">
-                Notes
-              </div>
-              <p class="text-[13px] whitespace-pre-wrap break-words text-foreground/90">{entry.notes}</p>
+              <Eyebrow class="mb-1.5">Notes</Eyebrow>
+              <p class="text-sm whitespace-pre-wrap break-words text-foreground/90">{entry.notes}</p>
             </div>
           {/if}
 
           {#if readExtraFields.length > 0}
             <div class="rounded-lg border bg-card shadow-xs overflow-hidden">
-              <div class="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/60 bg-muted/30">
-                Additional fields
-              </div>
-              <div class="divide-y divide-border/60">
+              <Eyebrow class="px-4 py-2 border-b border-border-subtle bg-muted/30">Additional fields</Eyebrow>
+              <div class="divide-y divide-border-subtle">
                 {#each readExtraFields as f, i (i)}
-                  <div class="group/row relative px-4 py-2.5 hover:bg-accent/30 transition-colors">
-                    <div class="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80 mb-0.5 flex items-center gap-1.5">
-                      {#if f.protected}<Shield class="size-3" />{/if}
-                      {f.name || "(unnamed)"}
-                    </div>
-                    <div class="text-[13px] {f.protected ? 'font-mono' : ''} break-all pr-9 min-h-[18px]">
-                      {#if f.value}
-                        {f.protected ? "•".repeat(Math.min(f.value.length, 14)) : f.value}
-                      {:else}
-                        <span class="text-muted-foreground/50 italic text-xs font-sans">empty</span>
-                      {/if}
-                    </div>
-                    {#if f.value}
-                      <button
-                        type="button"
-                        onclick={() => copyValue(f.value, f.name || "Field")}
-                        class="absolute right-2 top-1/2 -translate-y-1/2 size-7 inline-flex items-center justify-center rounded-md opacity-0 group-hover/row:opacity-100 transition-opacity hover:bg-foreground/10 text-muted-foreground hover:text-foreground"
-                        aria-label="Copy {f.name || 'field'}"
-                        title="Copy"
-                      >
-                        <Copy class="size-3.5" />
-                      </button>
-                    {/if}
-                  </div>
+                  <FieldRow
+                    variant="bare"
+                    label={f.name || "(unnamed)"}
+                    value={f.value}
+                    kind={f.protected ? "password" : "text"}
+                    protected={f.protected}
+                    copyLabel={f.name || "Field"}
+                  />
                 {/each}
               </div>
             </div>
@@ -604,15 +429,13 @@
             <div class="rounded-lg border bg-card shadow-xs px-4 py-3 flex items-center gap-3">
               <Calendar class="size-4 text-muted-foreground" />
               <div class="flex-1 min-w-0">
-                <div class="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80">
-                  Expires
-                </div>
-                <div class="text-[13px] mt-0.5">{formatTimestamp(entry.expiry_time)}</div>
+                <Eyebrow>Expires</Eyebrow>
+                <div class="text-sm mt-0.5">{formatTimestamp(entry.expiry_time)}</div>
               </div>
             </div>
           {/if}
 
-          <div class="pt-3 mt-2 border-t border-border/60 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px] text-muted-foreground">
+          <div class="pt-3 mt-2 border-t border-border-subtle flex flex-wrap items-center gap-x-5 gap-y-1.5 text-2xs text-muted-foreground">
             {#if entry.created}
               <span class="inline-flex items-center gap-1.5">
                 <Clock class="size-3" />
@@ -629,7 +452,7 @@
               <span class="inline-flex items-center gap-1.5 flex-wrap">
                 <Tag class="size-3" />
                 {#each readTags as t (t)}
-                  <span class="inline-flex items-center rounded-full bg-accent/60 px-2 py-0.5 text-[10.5px] text-foreground/80">{t}</span>
+                  <span class="inline-flex items-center rounded-full bg-accent/60 px-2 py-0.5 text-2xs text-foreground/80">{t}</span>
                 {/each}
               </span>
             {/if}
@@ -648,7 +471,7 @@
               placeholder="Entry title"
               class="text-base font-semibold"
             />
-            <p class="text-[11px] text-muted-foreground mt-1.5">
+            <p class="text-2xs text-muted-foreground mt-1.5">
               {#if hasChanges}
                 <span class="text-warning">●</span> Unsaved changes
               {:else}
@@ -657,19 +480,14 @@
             </p>
           </div>
           <div class="flex items-center gap-1 shrink-0">
-            <button
-              type="button"
-              onclick={toggleFavorite}
-              title={formData.is_favorite ? "Unfavorite" : "Favorite"}
-              aria-label={formData.is_favorite ? "Unfavorite" : "Favorite"}
-              class="size-9 inline-flex items-center justify-center rounded-md hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {#if formData.is_favorite}
-                <Star class="size-4 text-warning fill-warning" />
-              {:else}
-                <Star class="size-4" />
-              {/if}
-            </button>
+            <Tooltip label={formData.is_favorite ? "Unfavorite" : "Favorite"}>
+              <IconButton
+                onclick={toggleFavorite}
+                aria-label={formData.is_favorite ? "Unfavorite" : "Favorite"}
+              >
+                <Star class={formData.is_favorite ? "text-warning fill-warning" : ""} />
+              </IconButton>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -677,9 +495,7 @@
       <div class="flex-1 overflow-y-auto px-6 py-5">
         <div class="max-w-2xl mx-auto space-y-5">
           <section class="space-y-3">
-            <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-              Login details
-            </h3>
+            <Eyebrow class="px-1">Login details</Eyebrow>
 
             <div class="space-y-2">
               <Label for="ed-username">Username</Label>
@@ -745,16 +561,12 @@
           </section>
 
           <section class="space-y-2">
-            <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-              Two-factor authentication
-            </h3>
+            <Eyebrow class="px-1">Two-factor authentication</Eyebrow>
             <TotpSection formData={formData} onUpdate={(next) => { formData = next; hasChanges = true; }} />
           </section>
 
           <section class="space-y-2">
-            <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-              Notes
-            </h3>
+            <Eyebrow class="px-1">Notes</Eyebrow>
             <Textarea
               value={formData.notes}
               oninput={(e) => patch({ notes: e.currentTarget.value })}
@@ -764,9 +576,7 @@
           </section>
 
           <section class="space-y-2">
-            <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-              Tags
-            </h3>
+            <Eyebrow class="px-1">Tags</Eyebrow>
             <Input
               value={formData.tags}
               oninput={(e) => patch({ tags: e.currentTarget.value })}
@@ -776,9 +586,7 @@
 
           <section class="space-y-3">
             <div class="flex items-center justify-between px-1">
-              <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Additional fields
-              </h3>
+              <Eyebrow>Additional fields</Eyebrow>
               <Button variant="outline" size="sm" onclick={addField}>
                 <Plus class="size-3.5" />
                 Add field
@@ -786,9 +594,9 @@
             </div>
 
             {#if (formData.custom_fields ?? []).filter((f) => f.name.toLowerCase() !== "otp").length === 0}
-              <p class="text-[12px] text-muted-foreground italic px-1">No additional fields.</p>
+              <p class="text-xs text-muted-foreground italic px-1">No additional fields.</p>
             {:else}
-              <div class="rounded-lg border divide-y divide-border/60 overflow-hidden">
+              <div class="rounded-lg border divide-y divide-border-subtle overflow-hidden">
                 {#each formData.custom_fields ?? [] as field, i (i)}
                   {#if field.name.toLowerCase() !== "otp"}
                     <div class="flex items-center gap-3 px-3 py-2 hover:bg-accent/30 transition-colors">
@@ -801,18 +609,18 @@
                         }}
                       >
                         {#if field.protected}<Shield class="size-3 text-muted-foreground shrink-0" />{/if}
-                        <span class="text-[12.5px] font-medium truncate">{field.name || "(unnamed)"}</span>
-                        <span class="text-[12px] font-mono text-muted-foreground truncate">{field.protected ? "••••••••" : field.value || "—"}</span>
+                        <span class="text-sm font-medium truncate">{field.name || "(unnamed)"}</span>
+                        <span class="text-xs font-mono text-muted-foreground truncate">{field.protected ? "••••••••" : field.value || "—"}</span>
                       </button>
-                      <button
-                        type="button"
+                      <IconButton
+                        size="sm"
+                        tone="destructive"
                         onclick={() => deleteField(i)}
-                        class="size-7 inline-flex items-center justify-center rounded hover:bg-destructive/10 text-destructive"
                         title="Remove"
                         aria-label="Remove field"
                       >
-                        <Trash2 class="size-3.5" />
-                      </button>
+                        <Trash2 />
+                      </IconButton>
                     </div>
                   {/if}
                 {/each}
@@ -864,13 +672,11 @@
           </section>
 
           <section class="space-y-2">
-            <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-              Expiration
-            </h3>
+            <Eyebrow class="px-1">Expiration</Eyebrow>
             <div class="flex items-center gap-3">
               <label class="flex items-center gap-2 shrink-0">
                 <Checkbox checked={formData.expires} onCheckedChange={(c) => handleExpiresToggle(c === true)} />
-                <span class="text-[12.5px]">Expires</span>
+                <span class="text-sm">Expires</span>
               </label>
               <Input
                 type="datetime-local"
@@ -892,12 +698,10 @@
 
           {#if (formData.history ?? []).length > 0}
             <section class="space-y-2">
-              <h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
-                History
-              </h3>
-              <div class="rounded-lg border divide-y divide-border/60 overflow-hidden">
+              <Eyebrow class="px-1">History</Eyebrow>
+              <div class="rounded-lg border divide-y divide-border-subtle overflow-hidden">
                 {#each formData.history ?? [] as h, i (i)}
-                  <div class="flex items-center gap-3 px-3 py-2 text-[12px]">
+                  <div class="flex items-center gap-3 px-3 py-2 text-xs">
                     <span class="text-muted-foreground tabular-nums shrink-0">{formatTimestamp(h.timestamp)}</span>
                     <span class="flex-1 min-w-0 truncate">{h.title || "—"}</span>
                     <Button variant="outline" size="sm" onclick={() => restoreHistory(h)}>Restore</Button>
@@ -910,7 +714,7 @@
       </div>
 
       <div class="shrink-0 flex items-center justify-between gap-2 border-t px-6 py-3 bg-card/40 backdrop-blur">
-        <p class="text-[11.5px] text-muted-foreground">
+        <p class="text-xs text-muted-foreground">
           {hasChanges ? "You have unsaved changes." : "Click Save to commit, or Cancel to discard."}
         </p>
         <div class="flex items-center gap-2">

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Dialog, Input, Label, DropdownMenu, DropdownItem, DropdownSeparator, toast } from "$lib/ui";
+  import { Button, Dialog, Input, Label, DropdownMenu, DropdownItem, DropdownSeparator, ContextMenu, toast } from "$lib/ui";
   import IconPicker from "./IconPicker.svelte";
   import DynamicIcon from "./DynamicIcon.svelte";
   import { ChevronRight, Plus, Edit2, Trash2, MoreHorizontal, FolderPlus } from "@lucide/svelte";
@@ -232,89 +232,99 @@
   }
 </script>
 
+{#snippet folderMenuItems(g: GroupData, depth: number)}
+  <DropdownItem onSelect={() => openCreate(g.uuid)}>
+    <Plus class="size-4" />
+    <span>New Subfolder</span>
+  </DropdownItem>
+  <DropdownItem onSelect={() => openRename(g)}>
+    <Edit2 class="size-4" />
+    <span>Rename</span>
+  </DropdownItem>
+  {#if depth > 0}
+    <DropdownSeparator />
+    <DropdownItem destructive onSelect={() => handleDelete(g.uuid)}>
+      <Trash2 class="size-4" />
+      <span>Delete</span>
+    </DropdownItem>
+  {/if}
+{/snippet}
+
 {#snippet folder(g: GroupData, depth: number)}
   {@const hasChildren = g.children && g.children.length > 0}
   {@const isExpanded = expanded.has(g.uuid)}
   {@const isSelected = g.uuid === selectedUuid}
   {@const iconId = g.icon_id ?? 48}
   {@const isDropTarget = dropTarget === g.uuid}
-  <div
-    role="treeitem"
-    tabindex="-1"
-    aria-selected={isSelected}
-    draggable={depth > 0}
-    ondragstart={(e) => onFolderDragStart(e, g.uuid)}
-    ondragenter={(e) => onFolderDragEnter(e, g.uuid)}
-    ondragover={(e) => onFolderDragOver(e, g.uuid)}
-    ondragleave={() => onFolderDragLeave(g.uuid)}
-    ondrop={(e) => onFolderDrop(e, g.uuid)}
-    onclick={() => onSelectGroup(g.uuid)}
-    ondblclick={() => { if (hasChildren) toggle(g.uuid); }}
-    onkeydown={(e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onSelectGroup(g.uuid);
-      }
-    }}
-    class="group/row flex items-center gap-1 pr-1.5 h-7 rounded-md transition-colors cursor-pointer active:cursor-grabbing {isSelected
-      ? 'bg-selected text-selected-foreground'
-      : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground'} {isDropTarget
-      ? 'ring-2 ring-primary ring-inset bg-primary/10'
-      : ''}"
-    style="padding-left: {depth * 14 + 4}px;"
-  >
-    <button
-      type="button"
-      class="size-5 inline-flex items-center justify-center shrink-0 rounded {hasChildren
-        ? 'hover:bg-foreground/8'
-        : 'invisible'}"
-      onclick={(e) => {
-        e.stopPropagation();
-        if (hasChildren) toggle(g.uuid);
-      }}
-      tabindex={hasChildren ? 0 : -1}
-      aria-label={isExpanded ? "Collapse" : "Expand"}
-    >
-      <ChevronRight class="size-3 transition-transform duration-150 {isExpanded ? 'rotate-90' : ''}" />
-    </button>
-
-    <DynamicIcon
-      iconId={iconId}
-      class="size-3.5 shrink-0 {isSelected ? 'text-current' : 'text-muted-foreground'}"
-    />
-
-    <span class="flex-1 text-left text-[12.5px] font-medium truncate min-w-0 select-none">
-      {g.name}
-    </span>
-
-    <DropdownMenu align="end">
-      {#snippet trigger()}
+  <ContextMenu>
+    {#snippet trigger({ props })}
+      <div
+        {...props}
+        role="treeitem"
+        tabindex="-1"
+        aria-selected={isSelected}
+        draggable={depth > 0}
+        ondragstart={(e) => onFolderDragStart(e, g.uuid)}
+        ondragenter={(e) => onFolderDragEnter(e, g.uuid)}
+        ondragover={(e) => onFolderDragOver(e, g.uuid)}
+        ondragleave={() => onFolderDragLeave(g.uuid)}
+        ondrop={(e) => onFolderDrop(e, g.uuid)}
+        onclick={() => onSelectGroup(g.uuid)}
+        ondblclick={() => { if (hasChildren) toggle(g.uuid); }}
+        onkeydown={(e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelectGroup(g.uuid);
+          }
+        }}
+        class="group/row flex items-center gap-1 pr-1.5 h-7 rounded-md transition-colors cursor-pointer active:cursor-grabbing {isSelected
+          ? 'bg-selected text-selected-foreground'
+          : 'text-foreground/80 hover:bg-accent/60 hover:text-foreground'} {isDropTarget
+          ? 'ring-2 ring-primary ring-inset bg-primary/10'
+          : ''}"
+        style="padding-left: {depth * 14 + 4}px;"
+      >
         <button
           type="button"
-          aria-label="Folder actions"
-          onclick={(e: MouseEvent) => e.stopPropagation()}
-          class="opacity-0 group-hover/row:opacity-100 data-[state=open]:opacity-100 size-5 inline-flex items-center justify-center rounded hover:bg-foreground/10"
+          class="size-5 inline-flex items-center justify-center shrink-0 rounded {hasChildren
+            ? 'hover:bg-foreground/8'
+            : 'invisible'}"
+          onclick={(e) => {
+            e.stopPropagation();
+            if (hasChildren) toggle(g.uuid);
+          }}
+          tabindex={hasChildren ? 0 : -1}
+          aria-label={isExpanded ? "Collapse" : "Expand"}
         >
-          <MoreHorizontal class="size-3.5" />
+          <ChevronRight class="size-3 transition-transform duration-150 {isExpanded ? 'rotate-90' : ''}" />
         </button>
-      {/snippet}
-      <DropdownItem onSelect={() => openCreate(g.uuid)}>
-        <Plus class="size-4" />
-        <span>New Subfolder</span>
-      </DropdownItem>
-      <DropdownItem onSelect={() => openRename(g)}>
-        <Edit2 class="size-4" />
-        <span>Rename</span>
-      </DropdownItem>
-      {#if depth > 0}
-        <DropdownSeparator />
-        <DropdownItem destructive onSelect={() => handleDelete(g.uuid)}>
-          <Trash2 class="size-4" />
-          <span>Delete</span>
-        </DropdownItem>
-      {/if}
-    </DropdownMenu>
-  </div>
+
+        <DynamicIcon
+          iconId={iconId}
+          class="size-3.5 shrink-0 {isSelected ? 'text-current' : 'text-muted-foreground'}"
+        />
+
+        <span class="flex-1 text-left text-sm font-medium truncate min-w-0 select-none">
+          {g.name}
+        </span>
+
+        <DropdownMenu align="end">
+          {#snippet trigger()}
+            <button
+              type="button"
+              aria-label="Folder actions"
+              onclick={(e: MouseEvent) => e.stopPropagation()}
+              class="opacity-60 group-hover/row:opacity-100 data-[state=open]:opacity-100 size-5 inline-flex items-center justify-center rounded hover:bg-foreground/10 transition-opacity"
+            >
+              <MoreHorizontal class="size-3.5" />
+            </button>
+          {/snippet}
+          {@render folderMenuItems(g, depth)}
+        </DropdownMenu>
+      </div>
+    {/snippet}
+    {@render folderMenuItems(g, depth)}
+  </ContextMenu>
 
   {#if isExpanded && hasChildren}
     {#each g.children as child (child.uuid)}
@@ -324,14 +334,22 @@
 {/snippet}
 
 <div class="h-full flex flex-col">
-  <div class="flex-1 overflow-y-auto px-2 pb-2">
-    {@render folder(group, 0)}
-  </div>
+  <ContextMenu>
+    {#snippet trigger({ props })}
+      <div {...props} class="flex-1 overflow-y-auto px-2 pb-2">
+        {@render folder(group, 0)}
+      </div>
+    {/snippet}
+    <DropdownItem onSelect={() => openCreate(null)}>
+      <FolderPlus class="size-4" />
+      <span>New top-level folder</span>
+    </DropdownItem>
+  </ContextMenu>
   <div class="px-2 pb-2 shrink-0">
     <button
       type="button"
       onclick={() => openCreate(null)}
-      class="w-full flex items-center gap-2 h-7 px-2 rounded-md text-[12px] text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
+      class="w-full flex items-center gap-2 h-7 px-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors"
       title="New top-level folder"
     >
       <FolderPlus class="size-3.5" />

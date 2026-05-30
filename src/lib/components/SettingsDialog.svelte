@@ -1,34 +1,18 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Dialog as DialogPrimitive } from "bits-ui";
-  import { Button, Input, Label, Select, Switch, Dialog, toast } from "$lib/ui";
   import {
-    Palette,
-    Shield,
-    Database,
-    Settings as SettingsIcon,
-    Info,
-    Sun,
-    Moon,
-    Monitor,
-    Lock,
-    ShieldAlert,
-    Download,
-    RefreshCw,
-    KeyRound,
-    Fingerprint,
-    Rocket,
-    Puzzle,
-    Trash2,
-    X,
-    Heart,
-    ExternalLink,
-    Check,
+    Button, Input, Label, Select, Switch, Dialog, toast,
+    SettingsRow, UpdateCard,
+  } from "$lib/ui";
+  import { navRow } from "$lib/ui/recipes";
+  import { cn } from "$lib/utils";
+  import {
+    Palette, Shield, Database, Settings as SettingsIcon, Info,
+    Sun, Moon, Monitor, Lock, ShieldAlert, RefreshCw,
+    KeyRound, Fingerprint, Rocket, Puzzle, Trash2, Heart, ExternalLink,
   } from "@lucide/svelte";
   import { theme, type ThemeMode } from "$lib/theme.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
-  import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
-  import { relaunch } from "@tauri-apps/plugin-process";
   import { getVersion } from "@tauri-apps/api/app";
   import { open as openShell } from "@tauri-apps/plugin-shell";
   import {
@@ -97,9 +81,6 @@
   // ---------- application ----------
   let closeToTray = $state(true);
   let autostartOn = $state(false);
-  let updateStatus = $state<"idle" | "checking" | "uptodate" | "available" | "installing" | "error">("idle");
-  let updateVersion = $state("");
-  let updateError = $state("");
 
   let browsers = $state<BrowserInfo[] | null>(null);
   let extensionId = $state(typeof window !== "undefined" ? localStorage.getItem("browserExtensionId") ?? "" : "");
@@ -154,29 +135,6 @@
     } catch (e) { toast.error("Failed", String(e)); }
   }
   function applyHibp(v: boolean) { hibp = v; setHibpEnabled(v); }
-
-  async function check() {
-    updateStatus = "checking";
-    try {
-      const u = await checkForUpdate();
-      if (u) { updateStatus = "available"; updateVersion = u.version; }
-      else updateStatus = "uptodate";
-    } catch (e) {
-      updateStatus = "error";
-      updateError = e instanceof Error ? e.message : "Check failed";
-    }
-  }
-
-  async function install() {
-    updateStatus = "installing";
-    try {
-      const u = await checkForUpdate();
-      if (u) { await u.downloadAndInstall(); await relaunch(); }
-    } catch (e) {
-      updateStatus = "error";
-      updateError = e instanceof Error ? e.message : "Install failed";
-    }
-  }
 
   async function installExtension() {
     if (!extensionId.trim()) { toast.error("Extension ID required"); return; }
@@ -263,58 +221,41 @@
   }
 </script>
 
-<DialogPrimitive.Root bind:open>
-  <DialogPrimitive.Portal>
-    <DialogPrimitive.Overlay
-      class="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-    />
-    <DialogPrimitive.Content
-      class="fixed top-[50%] left-[50%] z-50 w-[min(900px,92vw)] h-[min(640px,82vh)] translate-x-[-50%] translate-y-[-50%] overflow-hidden rounded-xl border bg-background shadow-2xl outline-none flex data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
-    >
-      <DialogPrimitive.Title class="sr-only">Settings</DialogPrimitive.Title>
-      <DialogPrimitive.Description class="sr-only">Application settings</DialogPrimitive.Description>
+<Dialog bind:open bare size="xl">
+  <!-- Nav rail -->
+  <aside class="w-[200px] shrink-0 bg-sidebar border-r border-border-subtle flex flex-col">
+    <div class="px-4 pt-4 pb-3 text-sm font-semibold tracking-tight">Settings</div>
+    <nav class="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto">
+      {#each sections as s (s.id)}
+        {@const active = section === s.id}
+        <button
+          type="button"
+          onclick={() => (section = s.id)}
+          class={cn(
+            navRow({ active: false, size: "sm" }),
+            active && "bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary",
+          )}
+        >
+          <s.icon class="size-4 shrink-0" />
+          <span>{s.label}</span>
+        </button>
+      {/each}
+    </nav>
+  </aside>
 
-      <!-- Nav rail -->
-      <aside class="w-[200px] shrink-0 bg-sidebar border-r flex flex-col">
-        <div class="px-4 pt-4 pb-3 text-sm font-semibold tracking-tight">Settings</div>
-        <nav class="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto">
-          {#each sections as s (s.id)}
-            {@const active = section === s.id}
-            <button
-              type="button"
-              onclick={() => (section = s.id)}
-              class="w-full flex items-center gap-2.5 rounded-md px-2.5 h-8 text-sm font-medium transition-colors {active
-                ? 'bg-primary/15 text-primary'
-                : 'text-foreground/80 hover:bg-accent/60'}"
-            >
-              <s.icon class="size-4 shrink-0" />
-              <span>{s.label}</span>
-            </button>
-          {/each}
-        </nav>
-      </aside>
-
-      <!-- Content pane -->
-      <div class="flex-1 min-w-0 flex flex-col">
-        <div class="shrink-0 flex items-center justify-between border-b px-6 py-3">
-          <h2 class="text-base font-semibold">
-            {sections.find((s) => s.id === section)?.label ?? "Settings"}
-          </h2>
-          <DialogPrimitive.Close
-            class="size-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            <X class="size-4" />
-            <span class="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        </div>
+  <!-- Content pane -->
+  <div class="flex-1 min-w-0 flex flex-col">
+    <div class="shrink-0 flex items-center justify-between border-b border-border-subtle px-6 py-3">
+      <h2 class="text-base font-semibold">
+        {sections.find((s) => s.id === section)?.label ?? "Settings"}
+      </h2>
+    </div>
 
         <div class="flex-1 overflow-y-auto px-6 py-5">
           {#if section === "appearance"}
             <div class="space-y-6 max-w-md">
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium">Theme</h3>
-                <p class="text-xs text-muted-foreground">Choose how the app looks.</p>
-                <div class="flex items-center gap-3 pt-2">
+              <SettingsRow title="Theme" description="Choose how the app looks.">
+                <div class="flex items-center gap-3">
                   {#if theme.mode === "system"}
                     <Monitor class="h-5 w-5 text-muted-foreground" />
                   {:else if theme.mode === "light"}
@@ -326,16 +267,12 @@
                     <Select items={themeItems} value={theme.mode} onValueChange={applyTheme} />
                   </div>
                 </div>
-              </div>
+              </SettingsRow>
             </div>
           {:else if section === "security"}
             <div class="space-y-8 max-w-md">
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium flex items-center gap-2">
-                  <Lock class="h-4 w-4" /> Auto-lock
-                </h3>
-                <p class="text-xs text-muted-foreground">Lock the database after inactivity.</p>
-                <div class="pt-2 w-56">
+              <SettingsRow icon={Lock} title="Auto-lock" description="Lock the database after inactivity.">
+                <div class="w-56">
                   <Select
                     items={[
                       { value: "0", label: "Never" },
@@ -349,27 +286,25 @@
                     onValueChange={applyAutoLock}
                   />
                 </div>
-              </div>
+              </SettingsRow>
 
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium flex items-center gap-2">
-                  <ShieldAlert class="h-4 w-4" /> Breach detection (HIBP)
-                </h3>
-                <p class="text-xs text-muted-foreground">
-                  Check passwords against haveibeenpwned.com using k-anonymity. No plaintext leaves your machine.
-                </p>
-                <label class="flex items-center gap-2 pt-2">
+              <SettingsRow
+                icon={ShieldAlert}
+                title="Breach detection (HIBP)"
+                description="Check passwords against haveibeenpwned.com using k-anonymity. No plaintext leaves your machine."
+              >
+                <label class="flex items-center gap-2">
                   <Switch checked={hibp} onCheckedChange={applyHibp} />
                   <span class="text-sm">{hibp ? "Enabled" : "Disabled"}</span>
                 </label>
-              </div>
+              </SettingsRow>
 
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium flex items-center gap-2">
-                  <KeyRound class="h-4 w-4" /> Yubikey
-                </h3>
-                <p class="text-xs text-muted-foreground">Add an HMAC-SHA1 challenge-response factor for this database.</p>
-                <div class="flex items-center gap-3 pt-2">
+              <SettingsRow
+                icon={KeyRound}
+                title="Yubikey"
+                description="Add an HMAC-SHA1 challenge-response factor for this database."
+              >
+                <div class="flex items-center gap-3">
                   <span class="text-sm {yubikeyActive ? 'text-success' : 'text-muted-foreground'}">
                     {yubikeyActive ? "Enabled" : "Not enrolled"}
                   </span>
@@ -379,15 +314,15 @@
                     <Button size="sm" onclick={openYubikeyDialog}>Enable…</Button>
                   {/if}
                 </div>
-              </div>
+              </SettingsRow>
 
               {#if helloAvail}
-                <div class="space-y-1.5">
-                  <h3 class="text-sm font-medium flex items-center gap-2">
-                    <Fingerprint class="h-4 w-4" /> Windows Hello
-                  </h3>
-                  <p class="text-xs text-muted-foreground">Seal the master password behind Windows Hello for quick unlock.</p>
-                  <div class="flex items-center gap-3 pt-2">
+                <SettingsRow
+                  icon={Fingerprint}
+                  title="Windows Hello"
+                  description="Seal the master password behind Windows Hello for quick unlock."
+                >
+                  <div class="flex items-center gap-3">
                     <span class="text-sm {helloEnrolled ? 'text-success' : 'text-muted-foreground'}">
                       {helloEnrolled ? "Credential stored" : "Not enrolled"}
                     </span>
@@ -397,73 +332,50 @@
                       <Button size="sm" onclick={() => (helloDialogOpen = true)}>Enable…</Button>
                     {/if}
                   </div>
-                </div>
+                </SettingsRow>
               {/if}
             </div>
           {:else if section === "database"}
             <div class="space-y-8 max-w-md">
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium flex items-center gap-2">
-                  <RefreshCw class="h-4 w-4" /> Sync
-                </h3>
-                <p class="text-xs text-muted-foreground">
-                  Changes are saved automatically to disk. If the file is modified by another
-                  app, the new version is merged in silently — no action needed.
-                </p>
+              <SettingsRow
+                icon={RefreshCw}
+                title="Sync"
+                description="Changes are saved automatically to disk. If the file is modified by another app, the new version is merged in silently — no action needed."
+              >
                 {#if appState.dbPath}
-                  <p class="text-xs text-muted-foreground mt-3 break-all font-mono">{appState.dbPath}</p>
+                  <p class="text-xs text-muted-foreground break-all font-mono">{appState.dbPath}</p>
                 {/if}
-              </div>
+              </SettingsRow>
             </div>
           {:else if section === "application"}
             <div class="space-y-8 max-w-md">
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium">Close behavior</h3>
-                <p class="text-xs text-muted-foreground">What happens when you close the window.</p>
-                <label class="flex items-center gap-2 pt-2">
+              <SettingsRow title="Close behavior" description="What happens when you close the window.">
+                <label class="flex items-center gap-2">
                   <Switch checked={closeToTray} onCheckedChange={applyCloseToTray} />
                   <span class="text-sm">Minimize to system tray instead of quitting</span>
                 </label>
-              </div>
+              </SettingsRow>
 
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium flex items-center gap-2">
-                  <Rocket class="h-4 w-4" /> Autostart
-                </h3>
-                <p class="text-xs text-muted-foreground">Launch the app when you sign in.</p>
-                <label class="flex items-center gap-2 pt-2">
+              <SettingsRow icon={Rocket} title="Autostart" description="Launch the app when you sign in.">
+                <label class="flex items-center gap-2">
                   <Switch checked={autostartOn} onCheckedChange={applyAutostart} />
                   <span class="text-sm">{autostartOn ? "Enabled" : "Disabled"}</span>
                 </label>
-              </div>
+              </SettingsRow>
 
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium flex items-center gap-2">
-                  <Download class="h-4 w-4" /> Updates
-                </h3>
-                <p class="text-xs text-muted-foreground">
-                  {#if updateStatus === "idle"}Check for a newer version.{:else if updateStatus === "checking"}Checking…{:else if updateStatus === "uptodate"}You're on the latest version.{:else if updateStatus === "available"}<span class="font-medium text-foreground">v{updateVersion}</span> is ready to install.{:else if updateStatus === "installing"}Downloading and installing…{:else if updateStatus === "error"}<span class="text-destructive">{updateError}</span>{/if}
-                </p>
-                <div class="pt-2">
-                  {#if updateStatus === "available"}
-                    <Button size="sm" onclick={install}>Install &amp; restart</Button>
-                  {:else}
-                    <Button size="sm" variant="outline" onclick={check} disabled={updateStatus === "checking" || updateStatus === "installing"}>
-                      {updateStatus === "checking" ? "Checking…" : "Check for updates"}
-                    </Button>
-                  {/if}
-                </div>
-              </div>
+              <SettingsRow icon={SettingsIcon} title="Updates">
+                <UpdateCard variant="inline" />
+              </SettingsRow>
 
-              <div class="space-y-1.5">
-                <h3 class="text-sm font-medium flex items-center gap-2">
-                  <Puzzle class="h-4 w-4" /> Browser extension
-                </h3>
-                <p class="text-xs text-muted-foreground">Connect a browser extension via the native messaging host.</p>
+              <SettingsRow
+                icon={Puzzle}
+                title="Browser extension"
+                description="Connect a browser extension via the native messaging host."
+              >
                 {#if browsers && browsers.length > 0}
-                  <p class="text-xs text-muted-foreground">Detected: {browsers.map((b) => b.label).join(", ")}</p>
+                  <p class="text-xs text-muted-foreground mb-2">Detected: {browsers.map((b) => b.label).join(", ")}</p>
                 {/if}
-                <div class="pt-2 space-y-2">
+                <div class="space-y-2">
                   <Label for="ext-id">Extension ID</Label>
                   <Input id="ext-id" bind:value={extensionId} placeholder="abcdefghijklmnopqrstuvwxyzabcdef" />
                   <div class="flex gap-2">
@@ -488,7 +400,7 @@
                 {#if installError}
                   <p class="text-xs text-destructive">{installError}</p>
                 {/if}
-              </div>
+              </SettingsRow>
             </div>
           {:else if section === "about"}
             <div class="flex flex-col items-center text-center space-y-4 max-w-sm mx-auto pt-4">
@@ -504,7 +416,7 @@
                 <ExternalLink class="size-3.5" />
                 View on GitHub
               </Button>
-              <div class="pt-2 text-[11px] text-muted-foreground space-y-0.5">
+              <div class="pt-2 text-2xs text-muted-foreground space-y-0.5">
                 <p class="flex items-center justify-center gap-1">
                   Made with <Heart class="h-3 w-3 fill-current text-destructive" /> by Jonas Laux
                 </p>
@@ -514,9 +426,7 @@
           {/if}
         </div>
       </div>
-    </DialogPrimitive.Content>
-  </DialogPrimitive.Portal>
-</DialogPrimitive.Root>
+</Dialog>
 
 <!-- Yubikey enroll dialog -->
 <Dialog bind:open={yubikeyDialog} title="Enable Yubikey" description="Choose a Yubikey and a slot to enroll for this database.">

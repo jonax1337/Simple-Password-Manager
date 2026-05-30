@@ -7,7 +7,7 @@
   import UnlockScreen from "./UnlockScreen.svelte";
   import QuickUnlockScreen from "./QuickUnlockScreen.svelte";
   import MainApp from "./MainApp.svelte";
-  import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+  import { checkForUpdate } from "$lib/updater.svelte";
   import { toast } from "$lib/ui";
 
   let lastDatabasePath = $state<string | null>(null);
@@ -19,10 +19,10 @@
     const t = setTimeout(async () => {
       try {
         const u = await checkForUpdate();
-        if (u) {
+        if (u.available) {
           toast.action(
             `Update v${u.version} available`,
-            { label: "Install", onClick: () => u.downloadAndInstall() },
+            { label: "Install", onClick: () => u.install() },
             { description: "Click to download and restart." },
           );
         }

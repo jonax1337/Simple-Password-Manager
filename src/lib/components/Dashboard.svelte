@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { Card, CardHeader, CardTitle, CardDescription, CardContent, toast } from "$lib/ui";
-  import { Shield, Key, AlertTriangle, Clock, Star, TrendingUp, Copy, KeyRound } from "@lucide/svelte";
+  import { Card, CardHeader, CardTitle, CardDescription, CardContent, StatTile, toast } from "$lib/ui";
+  import { Shield, AlertTriangle, Clock, Star, TrendingUp, Copy, KeyRound } from "@lucide/svelte";
   import { getDashboardStats, type DashboardStats } from "$lib/tauri";
   import { getHibpEnabled } from "$lib/storage";
   import { appState } from "$lib/app-state.svelte";
@@ -71,15 +71,15 @@
         <Shield class="size-6" />
       </div>
       <div class="min-w-0 flex-1">
-        <h1 class="text-[24px] font-semibold tracking-tight leading-tight">Home</h1>
-        <p class="text-[13px] text-muted-foreground mt-0.5">
+        <h1 class="text-2xl font-semibold tracking-tight leading-tight">Home</h1>
+        <p class="text-sm text-muted-foreground mt-0.5">
           Vault overview — health, items, and recommendations.
         </p>
       </div>
       {#if healthScoreInt !== null}
         <div class="text-right">
-          <div class="text-[11px] text-muted-foreground uppercase tracking-wider">Vault health</div>
-          <div class="text-[28px] font-semibold tracking-tight {healthTone}">{healthScoreInt}%</div>
+          <div class="text-2xs text-muted-foreground uppercase tracking-wider">Vault health</div>
+          <div class="text-3xl font-semibold tracking-tight {healthTone}">{healthScoreInt}%</div>
         </div>
       {/if}
     </header>
@@ -95,45 +95,31 @@
 
     <!-- Stat tiles -->
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div class="rounded-xl border bg-card p-4 shadow-xs">
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Items</span>
-          <KeyRound class="size-3.5 text-muted-foreground" />
-        </div>
-        <div class="text-[24px] font-semibold mt-1.5">{stats?.total_entries ?? "—"}</div>
-        <p class="text-[11px] text-muted-foreground mt-0.5">Across {stats?.total_groups ?? "—"} folders</p>
-      </div>
-
-      <div class="rounded-xl border bg-card p-4 shadow-xs">
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Strength</span>
-          <TrendingUp class="size-3.5 text-muted-foreground" />
-        </div>
-        <div class="text-[24px] font-semibold mt-1.5 {strength.cls}">{strength.label}</div>
-        <p class="text-[11px] text-muted-foreground mt-0.5">
-          {stats ? Math.round(stats.average_password_strength) : "—"} bits average
-        </p>
-      </div>
-
-      <div class="rounded-xl border bg-card p-4 shadow-xs">
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Favorites</span>
-          <Star class="size-3.5 text-muted-foreground" />
-        </div>
-        <div class="text-[24px] font-semibold mt-1.5">{stats?.favorite_entries ?? "—"}</div>
-        <p class="text-[11px] text-muted-foreground mt-0.5">Marked for quick access</p>
-      </div>
-
-      <div class="rounded-xl border bg-card p-4 shadow-xs">
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Issues</span>
-          <AlertTriangle class="size-3.5 text-muted-foreground" />
-        </div>
-        <div class="text-[24px] font-semibold mt-1.5">
-          {stats ? stats.weak_passwords + stats.reused_passwords + stats.old_passwords + stats.expired_entries : "—"}
-        </div>
-        <p class="text-[11px] text-muted-foreground mt-0.5">Across all items</p>
-      </div>
+      <StatTile
+        label="Items"
+        icon={KeyRound}
+        value={stats?.total_entries ?? "—"}
+        description="Across {stats?.total_groups ?? '—'} folders"
+      />
+      <StatTile
+        label="Strength"
+        icon={TrendingUp}
+        value={strength.label}
+        valueClass={strength.cls}
+        description="{stats ? Math.round(stats.average_password_strength) : '—'} bits average"
+      />
+      <StatTile
+        label="Favorites"
+        icon={Star}
+        value={stats?.favorite_entries ?? "—"}
+        description="Marked for quick access"
+      />
+      <StatTile
+        label="Issues"
+        icon={AlertTriangle}
+        value={stats ? stats.weak_passwords + stats.reused_passwords + stats.old_passwords + stats.expired_entries : "—"}
+        description="Across all items"
+      />
     </div>
 
     <div class="grid gap-4 lg:grid-cols-2">
@@ -146,36 +132,36 @@
           <div class="flex items-center justify-between rounded-md px-3 py-2 hover:bg-accent/40 transition-colors">
             <div class="flex items-center gap-2">
               <AlertTriangle class="size-4 text-destructive" />
-              <span class="text-[13px] font-medium">Weak passwords</span>
+              <span class="text-sm font-medium">Weak passwords</span>
             </div>
-            <span class="text-[15px] font-semibold tabular-nums {stats && stats.weak_passwords > 0 ? 'text-destructive' : 'text-success'}">
+            <span class="text-md font-semibold tabular-nums {stats && stats.weak_passwords > 0 ? 'text-destructive' : 'text-success'}">
               {stats?.weak_passwords ?? "—"}
             </span>
           </div>
           <div class="flex items-center justify-between rounded-md px-3 py-2 hover:bg-accent/40 transition-colors">
             <div class="flex items-center gap-2">
               <Copy class="size-4 text-warning" />
-              <span class="text-[13px] font-medium">Reused passwords</span>
+              <span class="text-sm font-medium">Reused passwords</span>
             </div>
-            <span class="text-[15px] font-semibold tabular-nums {stats && stats.reused_passwords > 0 ? 'text-warning' : 'text-success'}">
+            <span class="text-md font-semibold tabular-nums {stats && stats.reused_passwords > 0 ? 'text-warning' : 'text-success'}">
               {stats?.reused_passwords ?? "—"}
             </span>
           </div>
           <div class="flex items-center justify-between rounded-md px-3 py-2 hover:bg-accent/40 transition-colors">
             <div class="flex items-center gap-2">
               <Clock class="size-4 text-warning" />
-              <span class="text-[13px] font-medium">Old passwords</span>
+              <span class="text-sm font-medium">Old passwords</span>
             </div>
-            <span class="text-[15px] font-semibold tabular-nums {stats && stats.old_passwords > 0 ? 'text-warning' : 'text-success'}">
+            <span class="text-md font-semibold tabular-nums {stats && stats.old_passwords > 0 ? 'text-warning' : 'text-success'}">
               {stats?.old_passwords ?? "—"}
             </span>
           </div>
           <div class="flex items-center justify-between rounded-md px-3 py-2 hover:bg-accent/40 transition-colors">
             <div class="flex items-center gap-2">
               <AlertTriangle class="size-4 text-destructive" />
-              <span class="text-[13px] font-medium">Expired entries</span>
+              <span class="text-sm font-medium">Expired entries</span>
             </div>
-            <span class="text-[15px] font-semibold tabular-nums {stats && stats.expired_entries > 0 ? 'text-destructive' : 'text-success'}">
+            <span class="text-md font-semibold tabular-nums {stats && stats.expired_entries > 0 ? 'text-destructive' : 'text-success'}">
               {stats?.expired_entries ?? "—"}
             </span>
           </div>
@@ -189,49 +175,49 @@
         </CardHeader>
         <CardContent class="space-y-3">
           {#if !stats}
-            <div class="text-[13px] text-muted-foreground">Loading recommendations…</div>
+            <div class="text-sm text-muted-foreground">Loading recommendations…</div>
           {:else if stats.weak_passwords === 0 && stats.reused_passwords === 0 && stats.old_passwords === 0 && stats.expired_entries === 0}
-            <div class="flex items-start gap-2.5 text-[13px] rounded-md p-3 bg-success/5 border border-success/15">
+            <div class="flex items-start gap-2.5 text-sm rounded-md p-3 bg-success/5 border border-success/15">
               <Shield class="size-4 text-success mt-0.5 shrink-0" />
               <div>
                 <p class="font-medium text-success">All clear</p>
-                <p class="text-muted-foreground text-[12px]">No security issues detected.</p>
+                <p class="text-muted-foreground text-xs">No security issues detected.</p>
               </div>
             </div>
           {:else}
             {#if stats.weak_passwords > 0}
-              <div class="flex items-start gap-2.5 text-[13px]">
+              <div class="flex items-start gap-2.5 text-sm">
                 <AlertTriangle class="size-4 text-destructive mt-0.5 shrink-0" />
                 <div>
                   <p class="font-medium">Update weak passwords</p>
-                  <p class="text-muted-foreground text-[12px]">{stats.weak_passwords} with less than 40 bits of entropy</p>
+                  <p class="text-muted-foreground text-xs">{stats.weak_passwords} with less than 40 bits of entropy</p>
                 </div>
               </div>
             {/if}
             {#if stats.reused_passwords > 0}
-              <div class="flex items-start gap-2.5 text-[13px]">
+              <div class="flex items-start gap-2.5 text-sm">
                 <Copy class="size-4 text-warning mt-0.5 shrink-0" />
                 <div>
                   <p class="font-medium">Replace reused passwords</p>
-                  <p class="text-muted-foreground text-[12px]">{stats.reused_passwords} used in multiple items</p>
+                  <p class="text-muted-foreground text-xs">{stats.reused_passwords} used in multiple items</p>
                 </div>
               </div>
             {/if}
             {#if stats.old_passwords > 0}
-              <div class="flex items-start gap-2.5 text-[13px]">
+              <div class="flex items-start gap-2.5 text-sm">
                 <Clock class="size-4 text-warning mt-0.5 shrink-0" />
                 <div>
                   <p class="font-medium">Refresh old passwords</p>
-                  <p class="text-muted-foreground text-[12px]">{stats.old_passwords} older than 90 days</p>
+                  <p class="text-muted-foreground text-xs">{stats.old_passwords} older than 90 days</p>
                 </div>
               </div>
             {/if}
             {#if stats.expired_entries > 0}
-              <div class="flex items-start gap-2.5 text-[13px]">
+              <div class="flex items-start gap-2.5 text-sm">
                 <AlertTriangle class="size-4 text-destructive mt-0.5 shrink-0" />
                 <div>
                   <p class="font-medium">Review expired entries</p>
-                  <p class="text-muted-foreground text-[12px]">{stats.expired_entries} past expiration</p>
+                  <p class="text-muted-foreground text-xs">{stats.expired_entries} past expiration</p>
                 </div>
               </div>
             {/if}

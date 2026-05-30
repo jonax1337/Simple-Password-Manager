@@ -12,8 +12,7 @@
 </script>
 
 <script lang="ts">
-  import type { Snippet } from "svelte";
-  import { Dialog as DialogPrimitive } from "bits-ui";
+  import { Dialog, Kbd } from "$lib/ui";
   import { Search } from "@lucide/svelte";
 
   type Props = {
@@ -131,70 +130,60 @@
   }
 </script>
 
-<DialogPrimitive.Root bind:open>
-  <DialogPrimitive.Portal>
-    <DialogPrimitive.Overlay
-      class="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
-    />
-    <DialogPrimitive.Content
-      class="fixed top-[18%] left-[50%] z-50 w-full max-w-[640px] translate-x-[-50%] rounded-xl border bg-popover text-popover-foreground shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95"
-    >
-      <DialogPrimitive.Title class="sr-only">Command palette</DialogPrimitive.Title>
-      <DialogPrimitive.Description class="sr-only">{placeholder}</DialogPrimitive.Description>
+<Dialog bind:open bare size="lg" placement="top" showClose={false} class="bg-popover text-popover-foreground">
+  <div class="flex flex-col w-full">
+    <div class="flex items-center gap-2 border-b border-border-subtle px-3 h-12">
+      <Search class="size-4 text-muted-foreground shrink-0" />
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        type="text"
+        bind:value={query}
+        {placeholder}
+        autofocus
+        class="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
+        onkeydown={onKey}
+        data-command-palette-input
+      />
+      <Kbd>Esc</Kbd>
+    </div>
 
-      <div class="flex items-center gap-2 border-b px-3 h-12">
-        <Search class="size-4 text-muted-foreground shrink-0" />
-        <!-- svelte-ignore a11y_autofocus -->
-        <input
-          type="text"
-          bind:value={query}
-          {placeholder}
-          autofocus
-          class="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
-          onkeydown={onKey}
-          data-command-palette-input
-        />
-        <kbd class="text-[10px] text-muted-foreground border rounded px-1.5 py-0.5">Esc</kbd>
-      </div>
-
-      <div bind:this={listEl} class="max-h-[60vh] overflow-y-auto p-1">
-        {#if flat.length === 0}
-          <div class="text-sm text-muted-foreground text-center py-8">{emptyMessage}</div>
-        {:else}
-          {#each sections as section (section.name)}
-            <div class="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-              {section.name}
-            </div>
-            {#each section.items as item (item.id)}
-              {@const idx = indexOfFlat(item)}
-              {@const isActive = idx === active}
-              <button
-                type="button"
-                data-active={isActive}
-                onpointermove={() => (active = idx)}
-                onclick={() => run(item)}
-                class="w-full flex items-center gap-3 rounded-md px-2 py-2 text-sm text-left transition-colors {isActive
-                  ? 'bg-accent text-accent-foreground'
-                  : 'hover:bg-accent/50'}"
-              >
-                {#if item.icon}
-                  <item.icon class="size-4 shrink-0 text-muted-foreground" />
-                {/if}
-                <span class="flex-1 truncate">{item.label}</span>
-                {#if item.hint}
-                  <span class="text-xs text-muted-foreground truncate">{item.hint}</span>
-                {/if}
-              </button>
-            {/each}
+    <div bind:this={listEl} class="max-h-[60vh] overflow-y-auto p-1">
+      {#if flat.length === 0}
+        <div class="text-sm text-muted-foreground text-center py-8">{emptyMessage}</div>
+      {:else}
+        {#each sections as section (section.name)}
+          <div class="px-2 pt-2 pb-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground/70">
+            {section.name}
+          </div>
+          {#each section.items as item (item.id)}
+            {@const idx = indexOfFlat(item)}
+            {@const isActive = idx === active}
+            <button
+              type="button"
+              data-active={isActive}
+              onpointermove={() => (active = idx)}
+              onclick={() => run(item)}
+              class="w-full flex items-center gap-3 rounded-md px-2 py-2 text-sm text-left transition-colors {isActive
+                ? 'bg-accent text-accent-foreground'
+                : 'hover:bg-accent/50'}"
+            >
+              {#if item.icon}
+                <item.icon class="size-4 shrink-0 text-muted-foreground" />
+              {/if}
+              <span class="flex-1 truncate">{item.label}</span>
+              {#if item.hint}
+                <span class="text-xs text-muted-foreground truncate">{item.hint}</span>
+              {/if}
+            </button>
           {/each}
-        {/if}
-      </div>
+        {/each}
+      {/if}
+    </div>
 
-      <div class="border-t px-3 py-1.5 flex items-center gap-3 text-[10px] text-muted-foreground">
-        <span class="flex items-center gap-1"><kbd class="border rounded px-1">↑↓</kbd> Navigate</span>
-        <span class="flex items-center gap-1"><kbd class="border rounded px-1">↵</kbd> Select</span>
-        <span class="flex items-center gap-1"><kbd class="border rounded px-1">Esc</kbd> Close</span>
-      </div>
-    </DialogPrimitive.Content>
-  </DialogPrimitive.Portal>
-</DialogPrimitive.Root>
+    <div class="border-t border-border-subtle px-3 py-1.5 flex items-center gap-3 text-2xs text-muted-foreground">
+      <span class="flex items-center gap-1"><Kbd>↑↓</Kbd> Navigate</span>
+      <span class="flex items-center gap-1"><Kbd>↵</Kbd> Select</span>
+      <span class="flex items-center gap-1"><Kbd>Esc</Kbd> Close</span>
+    </div>
+  </div>
+</Dialog>
