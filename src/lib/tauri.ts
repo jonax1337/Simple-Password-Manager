@@ -436,6 +436,27 @@ export async function cloudDisconnect(): Promise<void> {
   return invoke("cloud_disconnect");
 }
 
+export async function cloudLookupUser(
+  email: string,
+): Promise<{ user_id: string; account_pubkey_b64: string }> {
+  return invoke("cloud_lookup_user", { email });
+}
+
+export async function cloudShareVault(
+  vaultId: string,
+  recipientEmail: string,
+  role: "editor" | "reader",
+): Promise<void> {
+  return invoke("cloud_share_vault", { vaultId, recipientEmail, role });
+}
+
+export async function cloudUnshareVault(
+  vaultId: string,
+  userId: string,
+): Promise<void> {
+  return invoke("cloud_unshare_vault", { vaultId, userId });
+}
+
 // Persistence
 export async function cloudPersistSession(): Promise<boolean> {
   return invoke("cloud_persist_session");

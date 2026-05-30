@@ -39,6 +39,7 @@
     cloudPush,
     cloudPull,
     cloudDisconnect,
+    cloudShareVault,
     type BrowserInfo,
     type InstallReport,
     type YubikeyInfo,
@@ -198,6 +199,30 @@
       cloudError = String(e);
     } finally {
       cloudBusy = false;
+    }
+  }
+
+  // ---------- vault sharing ----------
+  let shareEmail = $state("");
+  let shareRole = $state<"editor" | "reader">("reader");
+  let shareBusy = $state(false);
+  let shareError = $state("");
+
+  async function doShareActiveVault() {
+    if (!cloudState.active_vault_id) {
+      shareError = "No active vault — open one from the cloud picker first.";
+      return;
+    }
+    shareBusy = true;
+    shareError = "";
+    try {
+      await cloudShareVault(cloudState.active_vault_id, shareEmail.trim(), shareRole);
+      toast.success("Shared", `${shareEmail} can now ${shareRole === "editor" ? "edit" : "view"} ${cloudState.active_vault_name}`);
+      shareEmail = "";
+    } catch (e) {
+      shareError = String(e);
+    } finally {
+      shareBusy = false;
     }
   }
 
@@ -473,6 +498,11 @@
                   <div class="space-y-2">
                     <p class="text-xs font-mono break-all">{cloudState.email}</p>
                     <p class="text-2xs text-muted-foreground break-all">{cloudState.server_url}</p>
+                    {#if cloudState.active_vault_name}
+                      <p class="text-2xs text-muted-foreground">
+                        Active vault: <span class="font-medium">{cloudState.active_vault_name}</span>
+                      </p>
+                    {/if}
                     <div class="flex gap-2 pt-1">
                       <Button size="sm" onclick={doCloudPush} disabled={cloudBusy}>
                         <ArrowUpFromLine class="size-3.5" />
@@ -489,6 +519,37 @@
                     </div>
                   </div>
                 </SettingsRow>
+
+                {#if cloudState.active_vault_id}
+                  <SettingsRow
+                    title="Share active vault"
+                    description="Invite another account by username. They need to have signed up on the same server already."
+                  >
+                    <div class="space-y-2">
+                      <div class="flex gap-2">
+                        <Input
+                          placeholder="alice@example.com"
+                          bind:value={shareEmail}
+                          class="flex-1"
+                        />
+                        <select bind:value={shareRole} class="h-9 px-2 rounded-md border bg-background text-sm">
+                          <option value="reader">Reader</option>
+                          <option value="editor">Editor</option>
+                        </select>
+                      </div>
+                      <Button
+                        size="sm"
+                        onclick={doShareActiveVault}
+                        disabled={shareBusy || !shareEmail.trim()}
+                      >
+                        {shareBusy ? "Sharing…" : "Share"}
+                      </Button>
+                      {#if shareError}
+                        <p class="text-xs text-destructive break-all">{shareError}</p>
+                      {/if}
+                    </div>
+                  </SettingsRow>
+                {/if}
               {:else}
                 <SettingsRow
                   icon={Cloud}
