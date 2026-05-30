@@ -55,10 +55,17 @@ async fn main() {
         .await
         .expect("bind socket");
     tracing::info!("listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("serve");
+    // ConnectInfo<SocketAddr> needs to be injected so tower_governor's
+    // SmartIpKeyExtractor can fall back to the socket peer when there's
+    // no X-Forwarded-For. Without this, the rate limiter 500s every
+    // request because PeerIpKeyExtractor can't find what it needs.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .expect("serve");
 }
 
 pub fn build_app(state: AuthState) -> Router {
