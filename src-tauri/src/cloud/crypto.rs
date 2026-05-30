@@ -81,7 +81,10 @@ pub fn b64_decode(s: &str) -> Result<Vec<u8>, CryptoError> {
 
 /// Run the slow first-stage KDF. This is the only place the master password
 /// is consumed.
-pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<SecretKey, CryptoError> {
+/// Derive the password-wrapping key. This is the only place the master
+/// password is consumed; the result is used to AES-GCM-wrap/unwrap the
+/// (random) master_key.
+pub fn derive_password_key(password: &str, salt: &[u8]) -> Result<SecretKey, CryptoError> {
     let params = Params::new(
         KDF_MEMORY_KIB,
         KDF_ITERATIONS,
@@ -94,6 +97,34 @@ pub fn derive_master_key(password: &str, salt: &[u8]) -> Result<SecretKey, Crypt
     argon
         .hash_password_into(password.as_bytes(), salt, &mut out)
         .map_err(|e| CryptoError::Kdf(e.to_string()))?;
+    Ok(SecretKey(out))
+}
+
+/// Generate the canonical 32-byte master_key at signup. Random; never
+/// derived from a password. Persistence: wrapped versions in cloud, never
+/// stored plaintext.
+pub fn generate_master_key() -> SecretKey {
+    let mut out = [0u8; 32];
+    rand::rng().fill_bytes(&mut out);
+    SecretKey(out)
+}
+
+/// Encrypt a SecretKey (master_key) under another SecretKey (password_key or
+/// recovery_key). Output layout matches `seal_vault`: 12-byte nonce ||
+/// ciphertext-with-tag.
+pub fn wrap_key(wrap_key: &SecretKey, key_to_wrap: &SecretKey) -> Result<Vec<u8>, CryptoError> {
+    seal_vault(wrap_key, key_to_wrap.as_bytes())
+}
+
+/// Inverse of `wrap_key`. Returns a fresh SecretKey holding the 32 plaintext
+/// bytes, with the usual zeroize-on-drop semantics.
+pub fn unwrap_key(wrap_key: &SecretKey, wrapped: &[u8]) -> Result<SecretKey, CryptoError> {
+    let plaintext = open_vault(wrap_key, wrapped)?;
+    if plaintext.len() != 32 {
+        return Err(CryptoError::Decrypt);
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&plaintext);
     Ok(SecretKey(out))
 }
 
@@ -128,6 +159,65 @@ pub fn seal_vault(vault_key: &SecretKey, plaintext: &[u8]) -> Result<Vec<u8>, Cr
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&ct);
     Ok(out)
+}
+
+/// Generate a 20-character recovery code: 16 random bytes encoded as
+/// Crockford-friendly base32 with dashes every 4 chars
+/// (`XXXX-XXXX-XXXX-XXXX-XXXX`). 80 bits of entropy — enough to resist
+/// offline brute-force when also gated by Argon2id derivation.
+pub fn generate_recovery_code() -> String {
+    let mut bytes = [0u8; 16];
+    rand::rng().fill_bytes(&mut bytes);
+    // Crockford base32 alphabet (no 0/O/I/L confusion). Manual encoding
+    // because we only have base64 in deps and we want the human-readable
+    // alphabet.
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let mut out = String::with_capacity(20 + 4); // 5 groups of 4 + 4 dashes
+    let mut buffer: u32 = 0;
+    let mut bits = 0u32;
+    let mut emitted = 0;
+    for b in bytes.iter().copied() {
+        buffer = (buffer << 8) | (b as u32);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            let idx = ((buffer >> bits) & 0x1F) as usize;
+            out.push(ALPHABET[idx] as char);
+            emitted += 1;
+            if emitted % 4 == 0 && emitted < 20 {
+                out.push('-');
+            }
+            if emitted == 20 {
+                return out;
+            }
+        }
+    }
+    out
+}
+
+/// Derive the wrapping key from a recovery code. Same Argon2id parameters
+/// as the password path, with a deterministic salt = SHA256(email) so the
+/// client can reproduce it later without storing anything alongside the
+/// printed code.
+pub fn derive_recovery_key(code: &str, email: &str) -> Result<SecretKey, CryptoError> {
+    // Normalize: strip dashes + whitespace, uppercase — humans transcribe
+    // codes inconsistently and "Aa-Bb cc" should map to the same key as
+    // "AABBCC".
+    let normalized: String = code
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    if normalized.is_empty() {
+        return Err(CryptoError::Kdf("empty recovery code".into()));
+    }
+    let salt = {
+        let mut h = Sha256::new();
+        h.update(b"recovery:");
+        h.update(email.as_bytes());
+        h.finalize()
+    };
+    derive_password_key(&normalized, &salt[..16])
 }
 
 pub fn open_vault(vault_key: &SecretKey, blob: &[u8]) -> Result<Vec<u8>, CryptoError> {

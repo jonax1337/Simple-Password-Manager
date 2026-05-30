@@ -1,5 +1,6 @@
 pub mod browser_extension;
 pub mod cloud;
+pub mod cloud_persistence;
 pub mod database;
 pub mod entry;
 pub mod group;

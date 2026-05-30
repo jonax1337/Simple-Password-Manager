@@ -1,0 +1,26 @@
+# Auto-TLS via Let's Encrypt. Caddy provisions the cert on first request
+# and renews ~30 days before expiry. ACME_EMAIL is used for recovery and
+# expiry notifications.
+{
+    email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+    encode zstd gzip
+
+    # Strict transport security: tell browsers to refuse plain HTTP for a
+    # year. Safe because Caddy redirects :80 -> :443 by default.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin
+        # CORS already handled by the vault server itself.
+    }
+
+    reverse_proxy vault:8090 {
+        # Pass the real client IP through so the server's tower_governor
+        # rate-limiter can throttle per-source instead of throttling Caddy.
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+    }
+}

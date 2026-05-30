@@ -8,10 +8,16 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
+use directories::ProjectDirs;
 use jsonwebtoken::{DecodingKey, EncodingKey};
+use rand::RngCore;
+use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tower_governor::{
+    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+};
 use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
 use tracing_subscriber::EnvFilter;
 
@@ -56,11 +62,43 @@ async fn main() {
 }
 
 pub fn build_app(state: AuthState) -> Router {
+    build_app_inner(state, true)
+}
+
+/// Variant used by tests: tests use `oneshot()` which has no socket peer,
+/// so the IP-based rate limiter would fail before reaching the handler.
+/// Production callers go through `build_app` and always get rate limiting.
+fn build_app_inner(state: AuthState, rate_limit: bool) -> Router {
     let public = Router::new()
-        .route("/health", get(health))
         .route("/auth/signup", post(auth::signup))
         .route("/auth/login", post(auth::login))
-        .route("/auth/kdf-params", post(auth::kdf_params));
+        .route("/auth/kdf-params", post(auth::kdf_params))
+        .route("/auth/recovery-init", post(auth::recovery_init))
+        .route("/auth/reset", post(auth::reset_password));
+
+    // Per-IP throttle for unauthenticated endpoints: bursts of 5, refilling
+    // 1 token every 6 seconds. That's ~10/minute steady-state — enough for
+    // a human re-trying a typo, far below what's useful for brute-forcing
+    // an Argon2id-hashed credential. Authenticated /vault traffic isn't
+    // gated because the bearer token is the rate limit.
+    //
+    // SmartIp falls back to X-Forwarded-For/X-Real-IP when no socket peer
+    // is available — which is what we want behind Caddy.
+    let public = if rate_limit {
+        let cfg = Arc::new(
+            GovernorConfigBuilder::default()
+                .per_second(6)
+                .burst_size(5)
+                .key_extractor(SmartIpKeyExtractor)
+                .finish()
+                .expect("valid governor config"),
+        );
+        public.layer(GovernorLayer::new(cfg))
+    } else {
+        public
+    };
+
+    let unrated = Router::new().route("/health", get(health));
 
     let protected = Router::new()
         .route("/vault", get(vault::get_vault))
@@ -72,6 +110,7 @@ pub fn build_app(state: AuthState) -> Router {
 
     Router::new()
         .merge(public)
+        .merge(unrated)
         .merge(protected)
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT))
         .layer(CorsLayer::permissive())
@@ -92,30 +131,104 @@ struct Config {
 
 impl Config {
     fn from_env() -> Self {
+        let data_dir = resolve_data_dir();
+        if let Err(e) = fs::create_dir_all(&data_dir) {
+            panic!("Failed to create data dir {}: {}", data_dir.display(), e);
+        }
+
         let bind: SocketAddr = std::env::var("BIND")
             .unwrap_or_else(|_| "0.0.0.0:8090".into())
             .parse()
             .expect("BIND must be host:port");
-        let db_path = PathBuf::from(
-            std::env::var("DB_PATH").unwrap_or_else(|_| "vault-server.db".into()),
-        );
-        // Refuse to start with a default secret in release. Self-hosters who
-        // skip the env var get a loud failure rather than a silently-insecure
-        // server.
-        let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
-            if cfg!(debug_assertions) {
-                eprintln!("WARN: using dev JWT_SECRET — set JWT_SECRET in production");
-                "dev-secret-do-not-use-in-prod".into()
-            } else {
-                panic!("JWT_SECRET env var is required in release builds");
-            }
-        });
+
+        let db_path = std::env::var("DB_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| data_dir.join("vault.db"));
+
+        // Auto-provision a JWT secret on first run and persist it next to the
+        // DB. Same-machine restarts pick it up automatically. To rotate,
+        // delete the file (this invalidates all sessions) or override with
+        // JWT_SECRET. Self-hosters never have to think about this.
+        let jwt_secret = match std::env::var("JWT_SECRET") {
+            Ok(v) if !v.trim().is_empty() => v,
+            _ => load_or_create_secret(&data_dir.join("jwt_secret"))
+                .expect("Failed to load or create JWT secret"),
+        };
+
+        tracing::info!(data_dir = %data_dir.display(), "config resolved");
+
         Self {
             bind,
             db_path,
             jwt_secret,
         }
     }
+}
+
+/// Pick a per-OS persistent dir (LocalAppData on Win, ~/.local/share on Linux,
+/// ~/Library/Application Support on macOS). Override with `DATA_DIR` env var
+/// for containers and unusual setups.
+fn resolve_data_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+    if let Some(dirs) = ProjectDirs::from("dev", "passwordwallet", "password-wallet-server") {
+        return dirs.data_dir().to_path_buf();
+    }
+    // Last resort: current dir. Worse than the OS default but at least the
+    // server still boots.
+    PathBuf::from(".")
+}
+
+/// Read an existing 32-byte hex secret, or generate one with restricted file
+/// permissions on Unix (0600). On Windows the file inherits ACLs from the
+/// user's profile dir — typically already owner-only.
+fn load_or_create_secret(path: &Path) -> std::io::Result<String> {
+    if let Ok(existing) = fs::read_to_string(path) {
+        let trimmed = existing.trim();
+        if trimmed.len() >= 32 {
+            return Ok(trimmed.to_string());
+        }
+    }
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let hex = hex::encode(bytes);
+    write_secret_atomic(path, &hex)?;
+    tracing::warn!(
+        secret_path = %path.display(),
+        "auto-generated new JWT secret — keep this file safe; deleting invalidates all sessions",
+    );
+    Ok(hex)
+}
+
+#[cfg(unix)]
+fn write_secret_atomic(path: &Path, value: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut tmp = path.to_path_buf();
+    tmp.set_extension("tmp");
+    {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(value.as_bytes())?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp, path)
+}
+
+#[cfg(not(unix))]
+fn write_secret_atomic(path: &Path, value: &str) -> std::io::Result<()> {
+    let mut tmp = path.to_path_buf();
+    tmp.set_extension("tmp");
+    fs::write(&tmp, value)?;
+    // On Windows, NTFS ACLs inherited from the parent dir (LocalAppData) are
+    // already owner-restricted; explicit chmod-equivalent would mean pulling
+    // in `windows-acl`. Skip for now.
+    fs::rename(&tmp, path)
 }
 
 async fn shutdown_signal() {
@@ -156,7 +269,9 @@ mod integration_tests {
             jwt_encode: Arc::new(EncodingKey::from_secret(secret)),
             jwt_decode: Arc::new(DecodingKey::from_secret(secret)),
         };
-        build_app(state)
+        // Tests skip the rate-limit layer — oneshot() has no socket peer
+        // and the IP key extractor would short-circuit before the handler.
+        super::build_app_inner(state, false)
     }
 
     async fn post_json(app: Router, path: &str, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
@@ -202,18 +317,24 @@ mod integration_tests {
         (status, etag, v)
     }
 
+    fn signup_payload(email: &str, auth_hash: &str) -> serde_json::Value {
+        json!({
+            "email": email,
+            "kdf_salt_b64": "c2FsdA==",
+            "client_auth_hash": auth_hash,
+            "wrapped_master_key_b64": "d3JhcHBlZC1tYXN0ZXIta2V5LWJsb2I=",
+            "recovery_blob_b64": "cmVjb3ZlcnktYmxvYg==",
+            "initial_vault_blob_b64": "aGVsbG8=",
+        })
+    }
+
     #[tokio::test]
     async fn signup_then_login_round_trips() {
         let app = fresh_app();
         let (status, body) = post_json(
             app.clone(),
             "/auth/signup",
-            json!({
-                "email": "a@b.test",
-                "kdf_salt_b64": "c2FsdA==",
-                "client_auth_hash": "deadbeefdeadbeef",
-                "initial_vault_blob_b64": "aGVsbG8=",
-            }),
+            signup_payload("alice", "deadbeefdeadbeef"),
         )
         .await;
         assert_eq!(status, StatusCode::OK, "signup: {:?}", body);
@@ -223,11 +344,15 @@ mod integration_tests {
         let (login_status, login_body) = post_json(
             app,
             "/auth/login",
-            json!({ "email": "a@b.test", "client_auth_hash": "deadbeefdeadbeef" }),
+            json!({ "email": "alice", "client_auth_hash": "deadbeefdeadbeef" }),
         )
         .await;
         assert_eq!(login_status, StatusCode::OK);
         assert_eq!(login_body["kdf_salt_b64"], "c2FsdA==");
+        assert_eq!(
+            login_body["wrapped_master_key_b64"],
+            "d3JhcHBlZC1tYXN0ZXIta2V5LWJsb2I="
+        );
     }
 
     #[tokio::test]
@@ -236,18 +361,86 @@ mod integration_tests {
         let _ = post_json(
             app.clone(),
             "/auth/signup",
-            json!({
-                "email": "a@b.test",
-                "kdf_salt_b64": "x",
-                "client_auth_hash": "correct-correct-correct",
-                "initial_vault_blob_b64": "Zg==",
-            }),
+            signup_payload("alice", "correct-correct-correct"),
         )
         .await;
         let (status, _) = post_json(
             app,
             "/auth/login",
-            json!({ "email": "a@b.test", "client_auth_hash": "wrong-wrong-wrong-wrong" }),
+            json!({ "email": "alice", "client_auth_hash": "wrong-wrong-wrong-wrong" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn recovery_init_returns_blob_then_reset_swaps_credentials() {
+        let app = fresh_app();
+        let _ = post_json(
+            app.clone(),
+            "/auth/signup",
+            signup_payload("bob", "old-auth-hash-1234"),
+        )
+        .await;
+
+        let (s_init, init_body) = post_json(
+            app.clone(),
+            "/auth/recovery-init",
+            json!({ "email": "bob" }),
+        )
+        .await;
+        assert_eq!(s_init, StatusCode::OK);
+        assert_eq!(init_body["recovery_blob_b64"], "cmVjb3ZlcnktYmxvYg==");
+
+        // Reset uses the SAME client_auth_hash (because master_key didn't
+        // change — we just re-wrapped it with a new password). Server
+        // accepts because the proof still matches.
+        let (s_reset, reset_body) = post_json(
+            app.clone(),
+            "/auth/reset",
+            json!({
+                "email": "bob",
+                "client_auth_hash": "old-auth-hash-1234",
+                "new_kdf_salt_b64": "bmV3LXNhbHQ=",
+                "new_wrapped_master_key_b64": "bmV3LXdyYXBwZWQta2V5LWJsb2I=",
+            }),
+        )
+        .await;
+        assert_eq!(s_reset, StatusCode::OK, "reset: {:?}", reset_body);
+        assert!(reset_body["token"].as_str().is_some());
+
+        // Subsequent login returns the NEW wrapped_master_key.
+        let (_, login_body) = post_json(
+            app,
+            "/auth/login",
+            json!({ "email": "bob", "client_auth_hash": "old-auth-hash-1234" }),
+        )
+        .await;
+        assert_eq!(login_body["kdf_salt_b64"], "bmV3LXNhbHQ=");
+        assert_eq!(
+            login_body["wrapped_master_key_b64"],
+            "bmV3LXdyYXBwZWQta2V5LWJsb2I="
+        );
+    }
+
+    #[tokio::test]
+    async fn reset_with_wrong_auth_hash_rejected() {
+        let app = fresh_app();
+        let _ = post_json(
+            app.clone(),
+            "/auth/signup",
+            signup_payload("carol", "real-auth-hash-1234"),
+        )
+        .await;
+        let (status, _) = post_json(
+            app,
+            "/auth/reset",
+            json!({
+                "email": "carol",
+                "client_auth_hash": "fake-auth-hash-9999",
+                "new_kdf_salt_b64": "x",
+                "new_wrapped_master_key_b64": "xx",
+            }),
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -270,9 +463,11 @@ mod integration_tests {
             app.clone(),
             "/auth/signup",
             json!({
-                "email": "x@y.test",
+                "email": "vaultuser",
                 "kdf_salt_b64": "x",
                 "client_auth_hash": "auth-auth-auth-auth",
+                "wrapped_master_key_b64": "d3JhcHBlZC1tYXN0ZXIta2V5LWJsb2I=",
+                "recovery_blob_b64": "cmVjb3ZlcnktYmxvYg==",
                 "initial_vault_blob_b64": "Zmlyc3Q=",
             }),
         )

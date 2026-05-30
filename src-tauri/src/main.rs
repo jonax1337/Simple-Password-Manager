@@ -105,10 +105,14 @@ fn main() {
             commands::hello::hello_clear,
             commands::cloud::cloud_signup,
             commands::cloud::cloud_login,
+            commands::cloud::cloud_recover,
             commands::cloud::cloud_push,
             commands::cloud::cloud_pull,
             commands::cloud::cloud_status,
             commands::cloud::cloud_disconnect,
+            commands::cloud_persistence::cloud_persist_session,
+            commands::cloud_persistence::cloud_rehydrate_session,
+            commands::cloud_persistence::cloud_forget_session,
         ])
         .setup(|app| {
             // Set up system tray

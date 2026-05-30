@@ -20,15 +20,23 @@ pub struct Storage {
 pub struct User {
     pub id: String,
     pub email: String,
-    /// Argon2-hashed value derived from the client's auth proof. The client
-    /// never sends the master password; it sends a hash that is itself
-    /// derived from the password (Argon2id on the client). We Argon2 that
-    /// hash again so a stolen DB doesn't immediately yield a usable
-    /// auth-token-equivalent.
+    /// Argon2-hashed value derived from the client's auth proof. The auth
+    /// proof itself is `SHA256(master_key || "auth")` — derived on the
+    /// client. We Argon2 it again here so a stolen DB doesn't directly
+    /// yield a usable auth-token-equivalent.
     pub server_auth_hash: String,
-    /// Salt the client used for its first-stage Argon2id. Public — needed by
-    /// the client on login to reproduce the same derivation.
+    /// Salt the client used for its first-stage Argon2id to derive
+    /// `password_key`. Public — needed on login.
     pub kdf_salt_b64: String,
+    /// `master_key` encrypted with `password_key` (AES-256-GCM, base64).
+    /// On login the client unwraps locally; the server never sees the key.
+    /// Enables password change without re-encrypting the vault and is the
+    /// substrate for recovery codes.
+    pub wrapped_master_key_b64: String,
+    /// `master_key` encrypted with the recovery code (AES-256-GCM, base64).
+    /// Empty if the user opted out of recovery (not recommended). Shown to
+    /// the user once at signup and never again.
+    pub recovery_blob_b64: String,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +77,8 @@ impl Storage {
                 email TEXT UNIQUE NOT NULL,
                 server_auth_hash TEXT NOT NULL,
                 kdf_salt_b64 TEXT NOT NULL,
+                wrapped_master_key_b64 TEXT NOT NULL,
+                recovery_blob_b64 TEXT NOT NULL,
                 created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS vaults (
@@ -90,13 +100,25 @@ impl Storage {
         email: &str,
         server_auth_hash: &str,
         kdf_salt_b64: &str,
+        wrapped_master_key_b64: &str,
+        recovery_blob_b64: &str,
     ) -> ApiResult<()> {
         let conn = self.inner.lock().unwrap();
         let now = now_secs();
         let res = conn.execute(
-            "INSERT INTO users (id, email, server_auth_hash, kdf_salt_b64, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, email, server_auth_hash, kdf_salt_b64, now],
+            "INSERT INTO users (
+                id, email, server_auth_hash, kdf_salt_b64,
+                wrapped_master_key_b64, recovery_blob_b64, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                email,
+                server_auth_hash,
+                kdf_salt_b64,
+                wrapped_master_key_b64,
+                recovery_blob_b64,
+                now
+            ],
         );
         match res {
             Ok(_) => Ok(()),
@@ -109,11 +131,41 @@ impl Storage {
         }
     }
 
+    /// Replace the wrapped-master-key + KDF salt + auth hash on an existing
+    /// user. Used by the recovery flow after the client has proved
+    /// possession of the recovery code and re-wrapped the master key with a
+    /// new password.
+    pub fn reset_credentials(
+        &self,
+        user_id: &str,
+        new_server_auth_hash: &str,
+        new_kdf_salt_b64: &str,
+        new_wrapped_master_key_b64: &str,
+    ) -> ApiResult<()> {
+        let conn = self.inner.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE users
+             SET server_auth_hash = ?1, kdf_salt_b64 = ?2, wrapped_master_key_b64 = ?3
+             WHERE id = ?4",
+            params![
+                new_server_auth_hash,
+                new_kdf_salt_b64,
+                new_wrapped_master_key_b64,
+                user_id
+            ],
+        )?;
+        if n == 0 {
+            return Err(ApiError::NotFound);
+        }
+        Ok(())
+    }
+
     pub fn find_user_by_email(&self, email: &str) -> ApiResult<Option<User>> {
         let conn = self.inner.lock().unwrap();
         let user = conn
             .query_row(
-                "SELECT id, email, server_auth_hash, kdf_salt_b64
+                "SELECT id, email, server_auth_hash, kdf_salt_b64,
+                        wrapped_master_key_b64, recovery_blob_b64
                  FROM users WHERE email = ?1",
                 params![email],
                 |row| {
@@ -122,6 +174,8 @@ impl Storage {
                         email: row.get(1)?,
                         server_auth_hash: row.get(2)?,
                         kdf_salt_b64: row.get(3)?,
+                        wrapped_master_key_b64: row.get(4)?,
+                        recovery_blob_b64: row.get(5)?,
                     })
                 },
             )
@@ -133,7 +187,8 @@ impl Storage {
         let conn = self.inner.lock().unwrap();
         let user = conn
             .query_row(
-                "SELECT id, email, server_auth_hash, kdf_salt_b64
+                "SELECT id, email, server_auth_hash, kdf_salt_b64,
+                        wrapped_master_key_b64, recovery_blob_b64
                  FROM users WHERE id = ?1",
                 params![id],
                 |row| {
@@ -142,6 +197,8 @@ impl Storage {
                         email: row.get(1)?,
                         server_auth_hash: row.get(2)?,
                         kdf_salt_b64: row.get(3)?,
+                        wrapped_master_key_b64: row.get(4)?,
+                        recovery_blob_b64: row.get(5)?,
                     })
                 },
             )
@@ -234,7 +291,7 @@ mod tests {
     #[test]
     fn create_and_find_user_round_trips() {
         let s = Storage::open_in_memory().unwrap();
-        s.create_user("uid-1", "a@b.test", "hash", "salt").unwrap();
+        s.create_user("uid-1", "a@b.test", "hash", "salt", "wmk", "rec").unwrap();
         let u = s.find_user_by_email("a@b.test").unwrap().unwrap();
         assert_eq!(u.id, "uid-1");
         assert_eq!(u.kdf_salt_b64, "salt");
@@ -243,15 +300,15 @@ mod tests {
     #[test]
     fn duplicate_email_rejected() {
         let s = Storage::open_in_memory().unwrap();
-        s.create_user("uid-1", "a@b.test", "h", "s").unwrap();
-        let err = s.create_user("uid-2", "a@b.test", "h", "s").unwrap_err();
+        s.create_user("uid-1", "a@b.test", "h", "s", "w", "r").unwrap();
+        let err = s.create_user("uid-2", "a@b.test", "h", "s", "w", "r").unwrap_err();
         assert!(matches!(err, ApiError::UserExists));
     }
 
     #[test]
     fn vault_create_then_update_with_etag() {
         let s = Storage::open_in_memory().unwrap();
-        s.create_user("u", "e@x", "h", "s").unwrap();
+        s.create_user("u", "e@x", "h", "s", "w", "r").unwrap();
         let first = s.upsert_vault("u", "blob-1", "etag-1", None).unwrap();
         assert_eq!(first.etag, "etag-1");
         let second = s
@@ -263,7 +320,7 @@ mod tests {
     #[test]
     fn vault_etag_mismatch_returns_conflict() {
         let s = Storage::open_in_memory().unwrap();
-        s.create_user("u", "e@x", "h", "s").unwrap();
+        s.create_user("u", "e@x", "h", "s", "w", "r").unwrap();
         s.upsert_vault("u", "blob-1", "etag-1", None).unwrap();
         let err = s
             .upsert_vault("u", "blob-2", "etag-2", Some("wrong-etag"))
@@ -274,7 +331,7 @@ mod tests {
     #[test]
     fn vault_create_with_expected_etag_when_none_exists_is_conflict() {
         let s = Storage::open_in_memory().unwrap();
-        s.create_user("u", "e@x", "h", "s").unwrap();
+        s.create_user("u", "e@x", "h", "s", "w", "r").unwrap();
         let err = s
             .upsert_vault("u", "blob-1", "etag-1", Some("ghost"))
             .unwrap_err();

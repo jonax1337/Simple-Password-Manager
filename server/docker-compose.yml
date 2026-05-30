@@ -1,0 +1,46 @@
+# One-command HTTPS deploy. Walks through:
+#   1. cp .env.example .env  &&  edit DOMAIN + ACME_EMAIL
+#   2. docker compose up -d
+#   3. point DNS at this host  -> Caddy provisions a Let's Encrypt cert
+#      on first request and renews automatically.
+#
+# Behind the cert lives the vault server on plain HTTP (loopback only).
+# Caddy handles all TLS termination, HTTP/2, and HSTS.
+
+services:
+  vault:
+    build: .
+    restart: unless-stopped
+    expose:
+      - "8090"
+    volumes:
+      - vault-data:/data
+    environment:
+      BIND: "0.0.0.0:8090"
+      DATA_DIR: /data
+      # JWT_SECRET intentionally NOT set: the server auto-generates one on
+      # first run and persists it in /data/jwt_secret. Override here only if
+      # you need to share a secret across multiple replicas.
+      RUST_LOG: ${RUST_LOG:-info}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    depends_on:
+      - vault
+
+volumes:
+  vault-data:
+  caddy-data:
+  caddy-config:

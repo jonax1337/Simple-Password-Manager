@@ -30,6 +30,8 @@ struct SignupReq<'a> {
     email: &'a str,
     kdf_salt_b64: &'a str,
     client_auth_hash: &'a str,
+    wrapped_master_key_b64: &'a str,
+    recovery_blob_b64: &'a str,
     initial_vault_blob_b64: &'a str,
 }
 
@@ -50,6 +52,7 @@ pub struct LoginResp {
     pub token: String,
     pub user_id: String,
     pub kdf_salt_b64: String,
+    pub wrapped_master_key_b64: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,6 +66,30 @@ struct EmailOnlyReq<'a> {
 #[derive(Debug, Deserialize)]
 pub struct KdfParamsResp {
     pub kdf_salt_b64: String,
+    pub wrapped_master_key_b64: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RecoveryInitReq<'a> {
+    email: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RecoveryInitResp {
+    pub recovery_blob_b64: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ResetReq<'a> {
+    email: &'a str,
+    client_auth_hash: &'a str,
+    new_kdf_salt_b64: &'a str,
+    new_wrapped_master_key_b64: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetResp {
+    pub token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +130,8 @@ impl CloudClient {
         email: &str,
         kdf_salt_b64: &str,
         client_auth_hash: &str,
+        wrapped_master_key_b64: &str,
+        recovery_blob_b64: &str,
         initial_vault_blob_b64: &str,
     ) -> Result<SignupResp, CloudError> {
         let res = self
@@ -112,7 +141,40 @@ impl CloudClient {
                 email,
                 kdf_salt_b64,
                 client_auth_hash,
+                wrapped_master_key_b64,
+                recovery_blob_b64,
                 initial_vault_blob_b64,
+            })
+            .send()
+            .await?;
+        self.parse_json(res).await
+    }
+
+    pub async fn recovery_init(&self, email: &str) -> Result<RecoveryInitResp, CloudError> {
+        let res = self
+            .http
+            .post(format!("{}/auth/recovery-init", self.base_url))
+            .json(&RecoveryInitReq { email })
+            .send()
+            .await?;
+        self.parse_json(res).await
+    }
+
+    pub async fn reset_password(
+        &self,
+        email: &str,
+        client_auth_hash: &str,
+        new_kdf_salt_b64: &str,
+        new_wrapped_master_key_b64: &str,
+    ) -> Result<ResetResp, CloudError> {
+        let res = self
+            .http
+            .post(format!("{}/auth/reset", self.base_url))
+            .json(&ResetReq {
+                email,
+                client_auth_hash,
+                new_kdf_salt_b64,
+                new_wrapped_master_key_b64,
             })
             .send()
             .await?;
