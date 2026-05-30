@@ -101,8 +101,12 @@ fn build_app_inner(state: AuthState, rate_limit: bool) -> Router {
     let unrated = Router::new().route("/health", get(health));
 
     let protected = Router::new()
-        .route("/vault", get(vault::get_vault))
-        .route("/vault", put(vault::put_vault))
+        .route("/vaults", post(vault::create_vault))
+        .route("/vaults", get(vault::list_vaults))
+        .route("/vaults/{id}", get(vault::get_vault))
+        .route("/vaults/{id}", put(vault::put_vault))
+        .route("/vaults/{id}", axum::routing::patch(vault::rename_vault))
+        .route("/vaults/{id}", axum::routing::delete(vault::delete_vault))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
@@ -324,7 +328,11 @@ mod integration_tests {
             "client_auth_hash": auth_hash,
             "wrapped_master_key_b64": "d3JhcHBlZC1tYXN0ZXIta2V5LWJsb2I=",
             "recovery_blob_b64": "cmVjb3ZlcnktYmxvYg==",
+            "account_pubkey_b64": "",
+            "wrapped_account_privkey_b64": "",
+            "initial_vault_name": "Personal",
             "initial_vault_blob_b64": "aGVsbG8=",
+            "initial_wrapped_vault_key_b64": "d3JhcHBlZC12YXVsdC1rZXk=",
         })
     }
 
@@ -447,56 +455,96 @@ mod integration_tests {
     }
 
     #[tokio::test]
-    async fn vault_get_requires_auth() {
+    async fn list_vaults_requires_auth() {
         let app = fresh_app();
         let res = app
-            .oneshot(Request::get("/vault").body(Body::empty()).unwrap())
+            .oneshot(Request::get("/vaults").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
-    async fn vault_put_with_stale_etag_returns_409() {
+    async fn signup_creates_first_vault_listable_by_owner() {
         let app = fresh_app();
         let (_, signup) = post_json(
             app.clone(),
             "/auth/signup",
-            json!({
-                "email": "vaultuser",
-                "kdf_salt_b64": "x",
-                "client_auth_hash": "auth-auth-auth-auth",
-                "wrapped_master_key_b64": "d3JhcHBlZC1tYXN0ZXIta2V5LWJsb2I=",
-                "recovery_blob_b64": "cmVjb3ZlcnktYmxvYg==",
-                "initial_vault_blob_b64": "Zmlyc3Q=",
-            }),
+            signup_payload("vaultuser", "auth-auth-auth-auth"),
         )
         .await;
         let token = signup["token"].as_str().unwrap().to_string();
 
-        let (_, etag, get_body) = auth_request(app.clone(), "GET", "/vault", &token, None).await;
-        let real_etag = get_body["etag"].as_str().unwrap().to_string();
-        assert!(!real_etag.is_empty());
-        assert_eq!(etag.to_str().unwrap(), real_etag);
+        let (s, _, body) = auth_request(app, "GET", "/vaults", &token, None).await;
+        assert_eq!(s, StatusCode::OK);
+        let vaults = body["vaults"].as_array().unwrap();
+        assert_eq!(vaults.len(), 1);
+        assert_eq!(vaults[0]["name"], "Personal");
+        assert_eq!(vaults[0]["role"], "owner");
+        assert_eq!(
+            vaults[0]["wrapped_vault_key_b64"],
+            "d3JhcHBlZC12YXVsdC1rZXk="
+        );
+    }
 
-        // First update with correct etag succeeds.
+    #[tokio::test]
+    async fn create_then_get_then_put_vault_round_trips() {
+        let app = fresh_app();
+        let (_, signup) = post_json(
+            app.clone(),
+            "/auth/signup",
+            signup_payload("rt", "auth-auth-auth-auth"),
+        )
+        .await;
+        let token = signup["token"].as_str().unwrap().to_string();
+
+        let (s_create, _, body) = auth_request(
+            app.clone(),
+            "POST",
+            "/vaults",
+            &token,
+            Some(json!({
+                "name": "Work",
+                "ciphertext_b64": "d29yay1ibG9i",
+                "wrapped_vault_key_b64": "d3JhcHBlZC13b3JrLWtleS1tb3JlIHRoYW4gMjQ=",
+            })),
+        )
+        .await;
+        assert_eq!(s_create, StatusCode::OK);
+        let id = body["id"].as_str().unwrap().to_string();
+        let first_etag = body["etag"].as_str().unwrap().to_string();
+
+        // GET single vault
+        let (s_get, _, full) =
+            auth_request(app.clone(), "GET", &format!("/vaults/{}", id), &token, None).await;
+        assert_eq!(s_get, StatusCode::OK);
+        assert_eq!(full["ciphertext_b64"], "d29yay1ibG9i");
+        assert_eq!(full["role"], "owner");
+
+        // PUT with correct etag
         let (s1, _, _) = auth_request(
             app.clone(),
             "PUT",
-            "/vault",
+            &format!("/vaults/{}", id),
             &token,
-            Some(json!({ "ciphertext_b64": "c2Vjb25k", "expected_etag": real_etag })),
+            Some(json!({
+                "ciphertext_b64": "d29yay1ibG9iLXYy",
+                "expected_etag": first_etag
+            })),
         )
         .await;
         assert_eq!(s1, StatusCode::OK);
 
-        // Re-using the now-stale etag fails.
+        // PUT with stale etag
         let (s2, _, _) = auth_request(
             app,
             "PUT",
-            "/vault",
+            &format!("/vaults/{}", id),
             &token,
-            Some(json!({ "ciphertext_b64": "dGhpcmQ=", "expected_etag": real_etag })),
+            Some(json!({
+                "ciphertext_b64": "d29yay1ibG9iLXYz",
+                "expected_etag": first_etag
+            })),
         )
         .await;
         assert_eq!(s2, StatusCode::CONFLICT);

@@ -64,9 +64,24 @@ pub struct SignupReq {
     /// `master_key` AES-GCM-wrapped with the recovery code. Empty string =
     /// user opted out (we still accept it but warn in the UI).
     pub recovery_blob_b64: String,
-    /// Initial encrypted vault blob (typically the freshly-created kdbx
-    /// file bytes after first signup).
+    /// Curve25519 public key. Used by future share-flows so other accounts
+    /// can wrap a vault_key targeted at this user. Optional during signup —
+    /// older clients can omit it and re-key later.
+    #[serde(default)]
+    pub account_pubkey_b64: String,
+    /// Curve25519 private key encrypted under master_key. Lets this user
+    /// receive shared vaults on any device once master_key is unwrapped.
+    #[serde(default)]
+    pub wrapped_account_privkey_b64: String,
+    /// First vault for the new account. Required — every signup creates
+    /// at least one vault so the client has somewhere to upload bytes.
+    pub initial_vault_name: String,
+    /// Vault contents (typically the freshly-created kdbx file, sealed
+    /// with `vault_key`).
     pub initial_vault_blob_b64: String,
+    /// `vault_key` wrapped with `master_key` so the user can decrypt it
+    /// on any device after unlocking master_key.
+    pub initial_wrapped_vault_key_b64: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -152,15 +167,19 @@ pub async fn signup(
         &req.kdf_salt_b64,
         &req.wrapped_master_key_b64,
         &req.recovery_blob_b64,
+        &req.account_pubkey_b64,
+        &req.wrapped_account_privkey_b64,
     )?;
 
-    // Initial vault upload — etag derived from blob length + a random suffix.
-    // The client uses ETag-based If-Match later; the value's only contract is
-    // "changes whenever the blob changes."
+    // Create the initial vault + owner membership in one transaction.
     let etag = make_etag(&req.initial_vault_blob_b64);
-    state
-        .storage
-        .upsert_vault(&user_id, &req.initial_vault_blob_b64, &etag, None)?;
+    state.storage.create_vault(
+        &user_id,
+        &req.initial_vault_name,
+        &req.initial_vault_blob_b64,
+        &etag,
+        &req.initial_wrapped_vault_key_b64,
+    )?;
 
     let token = make_token(&state, &user_id)?;
     Ok(Json(SignupResp { token, user_id }))

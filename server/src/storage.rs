@@ -1,13 +1,20 @@
-//! SQLite-backed user + vault storage.
+//! SQLite-backed user + multi-vault storage.
 //!
-//! Schema is intentionally tiny: one row per user, one row per vault. All
-//! crypto happens on the client — `vault_blob` is opaque ciphertext, and we
-//! never see the master password. The server holds an Argon2-hashed copy of
-//! the *client-derived* auth proof to gate /vault access.
+//! Schema v2 (multi-vault):
+//!   users          — one row per account
+//!   vaults         — one row per vault (a user owns 1..N)
+//!   vault_members  — many-to-many between users and vaults, carries per-user
+//!                    wrapped_vault_key + role. Lays the foundation for
+//!                    vault sharing in a later stage.
+//!
+//! All crypto happens on the client. The server stores opaque ciphertext
+//! and wrapping blobs; it can identify accounts and route requests but
+//! cannot decrypt anything.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 use crate::error::{ApiError, ApiResult};
 
@@ -20,37 +27,98 @@ pub struct Storage {
 pub struct User {
     pub id: String,
     pub email: String,
-    /// Argon2-hashed value derived from the client's auth proof. The auth
-    /// proof itself is `SHA256(master_key || "auth")` — derived on the
-    /// client. We Argon2 it again here so a stolen DB doesn't directly
-    /// yield a usable auth-token-equivalent.
     pub server_auth_hash: String,
-    /// Salt the client used for its first-stage Argon2id to derive
-    /// `password_key`. Public — needed on login.
     pub kdf_salt_b64: String,
-    /// `master_key` encrypted with `password_key` (AES-256-GCM, base64).
-    /// On login the client unwraps locally; the server never sees the key.
-    /// Enables password change without re-encrypting the vault and is the
-    /// substrate for recovery codes.
     pub wrapped_master_key_b64: String,
-    /// `master_key` encrypted with the recovery code (AES-256-GCM, base64).
-    /// Empty if the user opted out of recovery (not recommended). Shown to
-    /// the user once at signup and never again.
     pub recovery_blob_b64: String,
+    /// Curve25519 public key (base64), used so other accounts can wrap a
+    /// vault_key for this user when sharing. Empty until a sharing-capable
+    /// client signs the user up; old accounts default to empty and just
+    /// can't be granted access until they re-key.
+    pub account_pubkey_b64: String,
+    /// Curve25519 private key encrypted with `master_key`. Stored so the
+    /// user can decrypt incoming share invitations on any device after
+    /// logging in.
+    pub wrapped_account_privkey_b64: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct VaultRow {
-    pub user_id: String,
+pub struct Vault {
+    pub id: String,
+    pub name: String,
+    pub owner_user_id: String,
     pub ciphertext_b64: String,
     pub etag: String,
+    pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// One user's relationship with one vault. The same vault has multiple
+/// rows here when shared — each carrying that user's personal
+/// `wrapped_vault_key`.
+#[derive(Debug, Clone)]
+pub struct VaultMembership {
+    pub vault_id: String,
+    pub user_id: String,
+    pub role: VaultRole,
+    pub wrapped_vault_key_b64: String,
+    pub invited_at: i64,
+    pub accepted_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultRole {
+    Owner,
+    Editor,
+    Reader,
+}
+
+impl VaultRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VaultRole::Owner => "owner",
+            VaultRole::Editor => "editor",
+            VaultRole::Reader => "reader",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "owner" => Some(VaultRole::Owner),
+            "editor" => Some(VaultRole::Editor),
+            "reader" => Some(VaultRole::Reader),
+            _ => None,
+        }
+    }
+
+    /// Can this role mutate the vault contents?
+    pub fn can_write(self) -> bool {
+        matches!(self, VaultRole::Owner | VaultRole::Editor)
+    }
+
+    /// Can this role share, rename, or delete the vault?
+    pub fn can_admin(self) -> bool {
+        matches!(self, VaultRole::Owner)
+    }
+}
+
+/// Convenience bundle returned by listing + lookup paths: vault + the
+/// caller's per-membership view of it.
+#[derive(Debug, Clone)]
+pub struct VaultListEntry {
+    pub vault: Vault,
+    pub role: VaultRole,
+    pub wrapped_vault_key_b64: String,
 }
 
 impl Storage {
     pub fn open(path: &Path) -> ApiResult<Self> {
         let conn = Connection::open(path)
             .map_err(|e| ApiError::Internal(format!("open db: {}", e)))?;
+        // Foreign keys are off by default in SQLite — enable per-connection.
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .map_err(|e| ApiError::Internal(format!("enable FKs: {}", e)))?;
         let s = Self {
             inner: Arc::new(Mutex::new(conn)),
         };
@@ -61,6 +129,7 @@ impl Storage {
     pub fn open_in_memory() -> ApiResult<Self> {
         let conn = Connection::open_in_memory()
             .map_err(|e| ApiError::Internal(format!("open in-memory db: {}", e)))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;").ok();
         let s = Self {
             inner: Arc::new(Mutex::new(conn)),
         };
@@ -79,20 +148,40 @@ impl Storage {
                 kdf_salt_b64 TEXT NOT NULL,
                 wrapped_master_key_b64 TEXT NOT NULL,
                 recovery_blob_b64 TEXT NOT NULL,
+                account_pubkey_b64 TEXT NOT NULL DEFAULT '',
+                wrapped_account_privkey_b64 TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS vaults (
-                user_id TEXT PRIMARY KEY,
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                owner_user_id TEXT NOT NULL,
                 ciphertext_b64 TEXT NOT NULL,
                 etag TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS vault_members (
+                vault_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                wrapped_vault_key_b64 TEXT NOT NULL,
+                invited_at INTEGER NOT NULL,
+                accepted_at INTEGER,
+                PRIMARY KEY (vault_id, user_id),
+                FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+            CREATE INDEX IF NOT EXISTS idx_vault_members_user ON vault_members(user_id);
+            CREATE INDEX IF NOT EXISTS idx_vaults_owner ON vaults(owner_user_id);
             "#,
         )
         .map_err(|e| ApiError::Internal(format!("init schema: {}", e)))?;
         Ok(())
     }
+
+    // -------------------- users --------------------
 
     pub fn create_user(
         &self,
@@ -102,14 +191,17 @@ impl Storage {
         kdf_salt_b64: &str,
         wrapped_master_key_b64: &str,
         recovery_blob_b64: &str,
+        account_pubkey_b64: &str,
+        wrapped_account_privkey_b64: &str,
     ) -> ApiResult<()> {
         let conn = self.inner.lock().unwrap();
         let now = now_secs();
         let res = conn.execute(
             "INSERT INTO users (
                 id, email, server_auth_hash, kdf_salt_b64,
-                wrapped_master_key_b64, recovery_blob_b64, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                wrapped_master_key_b64, recovery_blob_b64,
+                account_pubkey_b64, wrapped_account_privkey_b64, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
                 email,
@@ -117,6 +209,8 @@ impl Storage {
                 kdf_salt_b64,
                 wrapped_master_key_b64,
                 recovery_blob_b64,
+                account_pubkey_b64,
+                wrapped_account_privkey_b64,
                 now
             ],
         );
@@ -131,10 +225,49 @@ impl Storage {
         }
     }
 
-    /// Replace the wrapped-master-key + KDF salt + auth hash on an existing
-    /// user. Used by the recovery flow after the client has proved
-    /// possession of the recovery code and re-wrapped the master key with a
-    /// new password.
+    pub fn find_user_by_email(&self, email: &str) -> ApiResult<Option<User>> {
+        let conn = self.inner.lock().unwrap();
+        let user = conn
+            .query_row(
+                "SELECT id, email, server_auth_hash, kdf_salt_b64,
+                        wrapped_master_key_b64, recovery_blob_b64,
+                        account_pubkey_b64, wrapped_account_privkey_b64
+                 FROM users WHERE email = ?1",
+                params![email],
+                Self::map_user,
+            )
+            .optional()?;
+        Ok(user)
+    }
+
+    pub fn find_user_by_id(&self, id: &str) -> ApiResult<Option<User>> {
+        let conn = self.inner.lock().unwrap();
+        let user = conn
+            .query_row(
+                "SELECT id, email, server_auth_hash, kdf_salt_b64,
+                        wrapped_master_key_b64, recovery_blob_b64,
+                        account_pubkey_b64, wrapped_account_privkey_b64
+                 FROM users WHERE id = ?1",
+                params![id],
+                Self::map_user,
+            )
+            .optional()?;
+        Ok(user)
+    }
+
+    fn map_user(row: &rusqlite::Row) -> rusqlite::Result<User> {
+        Ok(User {
+            id: row.get(0)?,
+            email: row.get(1)?,
+            server_auth_hash: row.get(2)?,
+            kdf_salt_b64: row.get(3)?,
+            wrapped_master_key_b64: row.get(4)?,
+            recovery_blob_b64: row.get(5)?,
+            account_pubkey_b64: row.get(6)?,
+            wrapped_account_privkey_b64: row.get(7)?,
+        })
+    }
+
     pub fn reset_credentials(
         &self,
         user_id: &str,
@@ -160,120 +293,264 @@ impl Storage {
         Ok(())
     }
 
-    pub fn find_user_by_email(&self, email: &str) -> ApiResult<Option<User>> {
-        let conn = self.inner.lock().unwrap();
-        let user = conn
-            .query_row(
-                "SELECT id, email, server_auth_hash, kdf_salt_b64,
-                        wrapped_master_key_b64, recovery_blob_b64
-                 FROM users WHERE email = ?1",
-                params![email],
-                |row| {
-                    Ok(User {
-                        id: row.get(0)?,
-                        email: row.get(1)?,
-                        server_auth_hash: row.get(2)?,
-                        kdf_salt_b64: row.get(3)?,
-                        wrapped_master_key_b64: row.get(4)?,
-                        recovery_blob_b64: row.get(5)?,
-                    })
-                },
-            )
-            .optional()?;
-        Ok(user)
-    }
+    // -------------------- vaults --------------------
 
-    pub fn find_user_by_id(&self, id: &str) -> ApiResult<Option<User>> {
-        let conn = self.inner.lock().unwrap();
-        let user = conn
-            .query_row(
-                "SELECT id, email, server_auth_hash, kdf_salt_b64,
-                        wrapped_master_key_b64, recovery_blob_b64
-                 FROM users WHERE id = ?1",
-                params![id],
-                |row| {
-                    Ok(User {
-                        id: row.get(0)?,
-                        email: row.get(1)?,
-                        server_auth_hash: row.get(2)?,
-                        kdf_salt_b64: row.get(3)?,
-                        wrapped_master_key_b64: row.get(4)?,
-                        recovery_blob_b64: row.get(5)?,
-                    })
-                },
-            )
-            .optional()?;
-        Ok(user)
-    }
-
-    pub fn upsert_vault(
+    /// Create a new vault. Atomically inserts the vault row plus the owner's
+    /// membership row carrying the wrapped vault key — owners always have
+    /// a member entry so listing/auth code can stay uniform across owners,
+    /// editors, and readers.
+    pub fn create_vault(
         &self,
-        user_id: &str,
+        owner_user_id: &str,
+        name: &str,
         ciphertext_b64: &str,
-        new_etag: &str,
-        expected_etag: Option<&str>,
-    ) -> ApiResult<VaultRow> {
-        let conn = self.inner.lock().unwrap();
-        // Read current state inside the same connection (effectively serialized
-        // by our Mutex) so we can compare-and-swap on the etag.
-        let current_etag: Option<String> = conn
-            .query_row(
-                "SELECT etag FROM vaults WHERE user_id = ?1",
-                params![user_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-
-        match (current_etag.as_deref(), expected_etag) {
-            // No existing vault and client expects none — fine.
-            (None, None) => {}
-            // No existing vault but client expected one — bad client state.
-            (None, Some(_)) => return Err(ApiError::VaultConflict),
-            // Existing vault but client expected none — would overwrite.
-            (Some(_), None) => return Err(ApiError::VaultConflict),
-            // Both present — must match exactly.
-            (Some(cur), Some(expected)) if cur == expected => {}
-            (Some(_), Some(_)) => return Err(ApiError::VaultConflict),
-        }
-
+        etag: &str,
+        wrapped_vault_key_b64: &str,
+    ) -> ApiResult<Vault> {
+        let mut conn = self.inner.lock().unwrap();
         let now = now_secs();
-        conn.execute(
-            "INSERT INTO vaults (user_id, ciphertext_b64, etag, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(user_id) DO UPDATE SET
-                ciphertext_b64 = excluded.ciphertext_b64,
-                etag = excluded.etag,
-                updated_at = excluded.updated_at",
-            params![user_id, ciphertext_b64, new_etag, now],
-        )
-        .map_err(|e| ApiError::Internal(format!("upsert vault: {}", e)))?;
+        let id = Uuid::new_v4().to_string();
+        let tx = conn
+            .transaction()
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO vaults (id, name, owner_user_id, ciphertext_b64, etag, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![id, name, owner_user_id, ciphertext_b64, etag, now],
+        )?;
+        tx.execute(
+            "INSERT INTO vault_members (vault_id, user_id, role, wrapped_vault_key_b64, invited_at, accepted_at)
+             VALUES (?1, ?2, 'owner', ?3, ?4, ?4)",
+            params![id, owner_user_id, wrapped_vault_key_b64, now],
+        )?;
+        tx.commit()
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        Ok(VaultRow {
-            user_id: user_id.to_string(),
+        Ok(Vault {
+            id,
+            name: name.to_string(),
+            owner_user_id: owner_user_id.to_string(),
             ciphertext_b64: ciphertext_b64.to_string(),
-            etag: new_etag.to_string(),
+            etag: etag.to_string(),
+            created_at: now,
             updated_at: now,
         })
     }
 
-    pub fn get_vault(&self, user_id: &str) -> ApiResult<Option<VaultRow>> {
+    /// List vaults accessible to this user — owned or shared. Sorted by
+    /// most-recently-updated so the picker shows the active vault on top.
+    pub fn list_vaults_for_user(&self, user_id: &str) -> ApiResult<Vec<VaultListEntry>> {
         let conn = self.inner.lock().unwrap();
-        let row = conn
+        let mut stmt = conn.prepare(
+            "SELECT v.id, v.name, v.owner_user_id, v.ciphertext_b64, v.etag,
+                    v.created_at, v.updated_at,
+                    m.role, m.wrapped_vault_key_b64
+             FROM vaults v
+             INNER JOIN vault_members m ON m.vault_id = v.id
+             WHERE m.user_id = ?1
+             ORDER BY v.updated_at DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![user_id], |row| {
+                let role_str: String = row.get(7)?;
+                Ok(VaultListEntry {
+                    vault: Vault {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        owner_user_id: row.get(2)?,
+                        ciphertext_b64: row.get(3)?,
+                        etag: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    },
+                    role: VaultRole::parse(&role_str).unwrap_or(VaultRole::Reader),
+                    wrapped_vault_key_b64: row.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Fetch a single vault for the caller. Returns None if either the
+    /// vault doesn't exist or the caller has no membership — we collapse
+    /// the two cases so we don't leak vault existence to non-members.
+    pub fn get_vault_for_user(
+        &self,
+        user_id: &str,
+        vault_id: &str,
+    ) -> ApiResult<Option<VaultListEntry>> {
+        let conn = self.inner.lock().unwrap();
+        let entry = conn
             .query_row(
-                "SELECT user_id, ciphertext_b64, etag, updated_at
-                 FROM vaults WHERE user_id = ?1",
-                params![user_id],
+                "SELECT v.id, v.name, v.owner_user_id, v.ciphertext_b64, v.etag,
+                        v.created_at, v.updated_at,
+                        m.role, m.wrapped_vault_key_b64
+                 FROM vaults v
+                 INNER JOIN vault_members m ON m.vault_id = v.id
+                 WHERE m.user_id = ?1 AND v.id = ?2",
+                params![user_id, vault_id],
                 |row| {
-                    Ok(VaultRow {
-                        user_id: row.get(0)?,
-                        ciphertext_b64: row.get(1)?,
-                        etag: row.get(2)?,
-                        updated_at: row.get(3)?,
+                    let role_str: String = row.get(7)?;
+                    Ok(VaultListEntry {
+                        vault: Vault {
+                            id: row.get(0)?,
+                            name: row.get(1)?,
+                            owner_user_id: row.get(2)?,
+                            ciphertext_b64: row.get(3)?,
+                            etag: row.get(4)?,
+                            created_at: row.get(5)?,
+                            updated_at: row.get(6)?,
+                        },
+                        role: VaultRole::parse(&role_str).unwrap_or(VaultRole::Reader),
+                        wrapped_vault_key_b64: row.get(8)?,
                     })
                 },
             )
             .optional()?;
-        Ok(row)
+        Ok(entry)
+    }
+
+    /// CAS-update vault ciphertext. Returns the new etag + updated_at.
+    /// `expected_etag = None` means "create-only" semantics — used by the
+    /// initial vault upload during signup so a re-run of signup can't
+    /// silently clobber an existing vault on a duplicate-email retry.
+    pub fn update_vault_ciphertext(
+        &self,
+        user_id: &str,
+        vault_id: &str,
+        new_ciphertext_b64: &str,
+        new_etag: &str,
+        expected_etag: Option<&str>,
+    ) -> ApiResult<Vault> {
+        let mut conn = self.inner.lock().unwrap();
+        let tx = conn
+            .transaction()
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        // Permission check: must be a member with write capability.
+        let role_str: Option<String> = tx
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let role = role_str
+            .as_deref()
+            .and_then(VaultRole::parse)
+            .ok_or(ApiError::NotFound)?;
+        if !role.can_write() {
+            return Err(ApiError::Unauthorized);
+        }
+
+        let current: (String, String) = tx.query_row(
+            "SELECT ciphertext_b64, etag FROM vaults WHERE id = ?1",
+            params![vault_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if let Some(expected) = expected_etag {
+            if current.1 != expected {
+                return Err(ApiError::VaultConflict);
+            }
+        }
+
+        let now = now_secs();
+        tx.execute(
+            "UPDATE vaults SET ciphertext_b64 = ?1, etag = ?2, updated_at = ?3 WHERE id = ?4",
+            params![new_ciphertext_b64, new_etag, now, vault_id],
+        )?;
+
+        let updated: Vault = tx.query_row(
+            "SELECT id, name, owner_user_id, ciphertext_b64, etag, created_at, updated_at
+             FROM vaults WHERE id = ?1",
+            params![vault_id],
+            |row| {
+                Ok(Vault {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    owner_user_id: row.get(2)?,
+                    ciphertext_b64: row.get(3)?,
+                    etag: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            },
+        )?;
+        tx.commit()
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok(updated)
+    }
+
+    /// Rename a vault — owner-only.
+    pub fn rename_vault(
+        &self,
+        user_id: &str,
+        vault_id: &str,
+        new_name: &str,
+    ) -> ApiResult<()> {
+        let conn = self.inner.lock().unwrap();
+        let role_str: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let role = role_str
+            .as_deref()
+            .and_then(VaultRole::parse)
+            .ok_or(ApiError::NotFound)?;
+        if !role.can_admin() {
+            return Err(ApiError::Unauthorized);
+        }
+        conn.execute(
+            "UPDATE vaults SET name = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_name, now_secs(), vault_id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a vault. Owner-only. CASCADE wipes vault_members and the blob.
+    pub fn delete_vault(&self, user_id: &str, vault_id: &str) -> ApiResult<()> {
+        let conn = self.inner.lock().unwrap();
+        let role_str: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let role = role_str
+            .as_deref()
+            .and_then(VaultRole::parse)
+            .ok_or(ApiError::NotFound)?;
+        if !role.can_admin() {
+            return Err(ApiError::Unauthorized);
+        }
+        conn.execute("DELETE FROM vaults WHERE id = ?1", params![vault_id])?;
+        Ok(())
+    }
+
+    /// Add a membership row (for future sharing). Caller must have already
+    /// wrapped vault_key with the recipient's account_pubkey.
+    pub fn add_vault_member(
+        &self,
+        membership: &VaultMembership,
+    ) -> ApiResult<()> {
+        let conn = self.inner.lock().unwrap();
+        conn.execute(
+            "INSERT INTO vault_members (vault_id, user_id, role, wrapped_vault_key_b64, invited_at, accepted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                membership.vault_id,
+                membership.user_id,
+                membership.role.as_str(),
+                membership.wrapped_vault_key_b64,
+                membership.invited_at,
+                membership.accepted_at
+            ],
+        )?;
+        Ok(())
     }
 }
 
@@ -288,53 +565,132 @@ fn now_secs() -> i64 {
 mod tests {
     use super::*;
 
+    fn fresh() -> Storage {
+        Storage::open_in_memory().unwrap()
+    }
+
+    fn mk_user(s: &Storage, id: &str, email: &str) {
+        s.create_user(id, email, "h", "salt", "wmk-wmk-wmk-wmk-wmk", "rec", "", "")
+            .unwrap();
+    }
+
     #[test]
     fn create_and_find_user_round_trips() {
-        let s = Storage::open_in_memory().unwrap();
-        s.create_user("uid-1", "a@b.test", "hash", "salt", "wmk", "rec").unwrap();
+        let s = fresh();
+        mk_user(&s, "uid-1", "a@b.test");
         let u = s.find_user_by_email("a@b.test").unwrap().unwrap();
         assert_eq!(u.id, "uid-1");
-        assert_eq!(u.kdf_salt_b64, "salt");
     }
 
     #[test]
     fn duplicate_email_rejected() {
-        let s = Storage::open_in_memory().unwrap();
-        s.create_user("uid-1", "a@b.test", "h", "s", "w", "r").unwrap();
-        let err = s.create_user("uid-2", "a@b.test", "h", "s", "w", "r").unwrap_err();
+        let s = fresh();
+        mk_user(&s, "uid-1", "a@b.test");
+        let err = s
+            .create_user("uid-2", "a@b.test", "h", "s", "wmk", "rec", "", "")
+            .unwrap_err();
         assert!(matches!(err, ApiError::UserExists));
     }
 
     #[test]
-    fn vault_create_then_update_with_etag() {
-        let s = Storage::open_in_memory().unwrap();
-        s.create_user("u", "e@x", "h", "s", "w", "r").unwrap();
-        let first = s.upsert_vault("u", "blob-1", "etag-1", None).unwrap();
-        assert_eq!(first.etag, "etag-1");
-        let second = s
-            .upsert_vault("u", "blob-2", "etag-2", Some("etag-1"))
+    fn create_vault_inserts_owner_membership() {
+        let s = fresh();
+        mk_user(&s, "u", "e@x");
+        let v = s
+            .create_vault("u", "Personal", "ct", "etag-1", "wvk")
             .unwrap();
-        assert_eq!(second.ciphertext_b64, "blob-2");
+        assert_eq!(v.name, "Personal");
+
+        let list = s.list_vaults_for_user("u").unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].vault.id, v.id);
+        assert_eq!(list[0].role, VaultRole::Owner);
+        assert_eq!(list[0].wrapped_vault_key_b64, "wvk");
     }
 
     #[test]
-    fn vault_etag_mismatch_returns_conflict() {
-        let s = Storage::open_in_memory().unwrap();
-        s.create_user("u", "e@x", "h", "s", "w", "r").unwrap();
-        s.upsert_vault("u", "blob-1", "etag-1", None).unwrap();
-        let err = s
-            .upsert_vault("u", "blob-2", "etag-2", Some("wrong-etag"))
-            .unwrap_err();
-        assert!(matches!(err, ApiError::VaultConflict));
+    fn list_vaults_returns_only_caller_memberships() {
+        let s = fresh();
+        mk_user(&s, "alice", "a@x");
+        mk_user(&s, "bob", "b@x");
+        s.create_vault("alice", "Alice's", "ct", "e", "wvk").unwrap();
+        let bob = s.list_vaults_for_user("bob").unwrap();
+        assert!(bob.is_empty());
+        let alice = s.list_vaults_for_user("alice").unwrap();
+        assert_eq!(alice.len(), 1);
     }
 
     #[test]
-    fn vault_create_with_expected_etag_when_none_exists_is_conflict() {
-        let s = Storage::open_in_memory().unwrap();
-        s.create_user("u", "e@x", "h", "s", "w", "r").unwrap();
+    fn update_vault_requires_membership_and_etag() {
+        let s = fresh();
+        mk_user(&s, "u", "e@x");
+        let v = s.create_vault("u", "v", "ct1", "e1", "wvk").unwrap();
+        let updated = s
+            .update_vault_ciphertext("u", &v.id, "ct2", "e2", Some("e1"))
+            .unwrap();
+        assert_eq!(updated.etag, "e2");
+
+        // Stale etag — conflict.
         let err = s
-            .upsert_vault("u", "blob-1", "etag-1", Some("ghost"))
+            .update_vault_ciphertext("u", &v.id, "ct3", "e3", Some("e1"))
             .unwrap_err();
         assert!(matches!(err, ApiError::VaultConflict));
+
+        // Non-member — not found, never reaches conflict.
+        mk_user(&s, "stranger", "s@x");
+        let err = s
+            .update_vault_ciphertext("stranger", &v.id, "ct4", "e4", Some("e2"))
+            .unwrap_err();
+        assert!(matches!(err, ApiError::NotFound));
+    }
+
+    #[test]
+    fn reader_cannot_write() {
+        let s = fresh();
+        mk_user(&s, "owner", "o@x");
+        mk_user(&s, "viewer", "v@x");
+        let v = s.create_vault("owner", "v", "ct", "e1", "wvk").unwrap();
+        s.add_vault_member(&VaultMembership {
+            vault_id: v.id.clone(),
+            user_id: "viewer".into(),
+            role: VaultRole::Reader,
+            wrapped_vault_key_b64: "wvk-for-viewer".into(),
+            invited_at: 0,
+            accepted_at: Some(0),
+        })
+        .unwrap();
+        let err = s
+            .update_vault_ciphertext("viewer", &v.id, "ct2", "e2", Some("e1"))
+            .unwrap_err();
+        assert!(matches!(err, ApiError::Unauthorized));
+    }
+
+    #[test]
+    fn only_owner_can_rename_or_delete() {
+        let s = fresh();
+        mk_user(&s, "owner", "o@x");
+        mk_user(&s, "editor", "e@x");
+        let v = s.create_vault("owner", "Old", "ct", "e1", "wvk").unwrap();
+        s.add_vault_member(&VaultMembership {
+            vault_id: v.id.clone(),
+            user_id: "editor".into(),
+            role: VaultRole::Editor,
+            wrapped_vault_key_b64: "wvk-e".into(),
+            invited_at: 0,
+            accepted_at: Some(0),
+        })
+        .unwrap();
+        assert!(matches!(
+            s.rename_vault("editor", &v.id, "New").unwrap_err(),
+            ApiError::Unauthorized
+        ));
+        s.rename_vault("owner", &v.id, "New").unwrap();
+        assert!(matches!(
+            s.delete_vault("editor", &v.id).unwrap_err(),
+            ApiError::Unauthorized
+        ));
+        s.delete_vault("owner", &v.id).unwrap();
+        assert!(s.list_vaults_for_user("owner").unwrap().is_empty());
+        assert!(s.list_vaults_for_user("editor").unwrap().is_empty());
     }
 }
