@@ -1,0 +1,24 @@
+{
+  "name": "password-wallet-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser dashboard for the password-wallet-server. View vaults, rename, delete. No vault contents are exposed in plain text — the server can't decrypt them.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "hash-wasm": "^4.11.0",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tsconfig/svelte": "^5.0.4",
+    "svelte-check": "^4.0.0",
+    "tslib": "^2.8.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  }
+}

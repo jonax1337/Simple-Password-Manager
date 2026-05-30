@@ -17,10 +17,19 @@
         # CORS already handled by the vault server itself.
     }
 
-    reverse_proxy vault:8090 {
-        # Pass the real client IP through so the server's tower_governor
-        # rate-limiter can throttle per-source instead of throttling Caddy.
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
+    # Static dashboard SPA. Build with `cd dashboard && npm run build`, then
+    # bind-mount the resulting dist/ at /srv/dashboard in the caddy service.
+    handle_path /dashboard/* {
+        root * /srv/dashboard
+        try_files {path} /index.html
+        file_server
+    }
+
+    # API: everything else proxies to the vault server.
+    handle {
+        reverse_proxy vault:8090 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
     }
 }
