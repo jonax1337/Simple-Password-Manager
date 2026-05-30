@@ -10,7 +10,7 @@
 //! ciphertext by the aes-gcm crate). Base64-encoded for transport.
 
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng as AeadOsRng},
+    aead::{rand_core::OsRng as CryptoOsRng, Aead, KeyInit, OsRng as AeadOsRng},
     AeadCore, Aes256Gcm, Key, Nonce,
 };
 use argon2_pure::{Algorithm, Argon2, Params, Version};
@@ -218,6 +218,156 @@ pub fn derive_recovery_key(code: &str, email: &str) -> Result<SecretKey, CryptoE
         h.finalize()
     };
     derive_password_key(&normalized, &salt[..16])
+}
+
+// ---------------- account keypair (Curve25519) ----------------
+
+/// Curve25519 keypair for vault sharing. The secret half lives in a
+/// fixed-size buffer with zeroize-on-drop so we don't accidentally leave
+/// it in heap pages after the session ends.
+pub struct AccountKeypair {
+    pub public_key: [u8; 32],
+    secret: [u8; 32],
+}
+
+impl Drop for AccountKeypair {
+    fn drop(&mut self) {
+        self.secret.zeroize();
+    }
+}
+
+impl AccountKeypair {
+    pub fn secret_bytes(&self) -> &[u8; 32] {
+        &self.secret
+    }
+    pub fn from_bytes(public: [u8; 32], secret: [u8; 32]) -> Self {
+        Self {
+            public_key: public,
+            secret,
+        }
+    }
+}
+
+pub fn generate_account_keypair() -> AccountKeypair {
+    // crypto_box 0.9 needs rand_core 0.6's CryptoRngCore. Use OsRng from
+    // rand_core (re-exported via aes_gcm) instead of the rand 0.9 helper.
+    let sk = crypto_box::SecretKey::generate(&mut CryptoOsRng);
+    let pk = sk.public_key();
+    AccountKeypair {
+        public_key: *pk.as_bytes(),
+        secret: sk.to_bytes(),
+    }
+}
+
+/// NaCl-style sealed_box, hand-rolled because crypto_box 0.9 dropped the
+/// top-level helpers. Construction:
+///
+///     ephemeral_kp = X25519::generate()
+///     box          = ChaCha20Poly1305(recipient_pub, ephemeral_secret)
+///     nonce        = SHA256(ephemeral_pub || recipient_pub)[..24]
+///     ciphertext   = box.encrypt(nonce, payload)
+///     output       = ephemeral_pub || ciphertext
+///
+/// The recipient reproduces `nonce` from their own public key + the
+/// embedded ephemeral pubkey. The ephemeral keypair is one-shot, so
+/// deterministic-nonce derivation is safe: ChaCha20Poly1305's nonce
+/// uniqueness requirement is bound to the *key*, which is unique per
+/// message.
+pub fn sealed_seal(recipient_pubkey: &[u8; 32], payload: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    let ephemeral_sk = crypto_box::SecretKey::generate(&mut CryptoOsRng);
+    let ephemeral_pk = ephemeral_sk.public_key();
+    let recipient_pk = crypto_box::PublicKey::from(*recipient_pubkey);
+
+    let chacha = crypto_box::ChaChaBox::new(&recipient_pk, &ephemeral_sk);
+    let nonce = sealed_nonce(ephemeral_pk.as_bytes(), recipient_pubkey);
+
+    use crypto_box::aead::Aead;
+    let ct = chacha
+        .encrypt(&nonce.into(), payload)
+        .map_err(|_| CryptoError::Encrypt)?;
+    let mut out = Vec::with_capacity(32 + ct.len());
+    out.extend_from_slice(ephemeral_pk.as_bytes());
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+pub fn sealed_open(
+    recipient_keypair: &AccountKeypair,
+    sealed: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if sealed.len() < 32 + 16 {
+        return Err(CryptoError::BlobTooShort);
+    }
+    let (eph_bytes, ct) = sealed.split_at(32);
+    let mut eph = [0u8; 32];
+    eph.copy_from_slice(eph_bytes);
+    let ephemeral_pk = crypto_box::PublicKey::from(eph);
+    let recipient_sk = crypto_box::SecretKey::from(recipient_keypair.secret);
+
+    let chacha = crypto_box::ChaChaBox::new(&ephemeral_pk, &recipient_sk);
+    let nonce = sealed_nonce(&eph, &recipient_keypair.public_key);
+
+    use crypto_box::aead::Aead;
+    chacha
+        .decrypt(&nonce.into(), ct)
+        .map_err(|_| CryptoError::Decrypt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrap_then_unwrap_round_trips() {
+        let outer = generate_master_key();
+        let inner = generate_master_key();
+        let wrapped = wrap_key(&outer, &inner).unwrap();
+        let recovered = unwrap_key(&outer, &wrapped).unwrap();
+        assert_eq!(inner.as_bytes(), recovered.as_bytes());
+    }
+
+    #[test]
+    fn wrong_key_fails_unwrap() {
+        let a = generate_master_key();
+        let b = generate_master_key();
+        let inner = generate_master_key();
+        let wrapped = wrap_key(&a, &inner).unwrap();
+        assert!(unwrap_key(&b, &wrapped).is_err());
+    }
+
+    #[test]
+    fn sealed_box_round_trips() {
+        let recipient = generate_account_keypair();
+        let payload = b"the launch codes are 0000000";
+        let sealed = sealed_seal(&recipient.public_key, payload).unwrap();
+        let opened = sealed_open(&recipient, &sealed).unwrap();
+        assert_eq!(opened, payload);
+    }
+
+    #[test]
+    fn sealed_box_wrong_recipient_fails() {
+        let alice = generate_account_keypair();
+        let bob = generate_account_keypair();
+        let sealed = sealed_seal(&alice.public_key, b"hello").unwrap();
+        assert!(sealed_open(&bob, &sealed).is_err());
+    }
+
+    #[test]
+    fn recovery_code_normalization() {
+        let key_pretty = derive_recovery_key("ABCD-EFGH-IJKL", "user@x.test").unwrap();
+        let key_messy = derive_recovery_key("abcd efgh ijkl", "user@x.test").unwrap();
+        assert_eq!(key_pretty.as_bytes(), key_messy.as_bytes());
+    }
+}
+
+fn sealed_nonce(ephemeral_pub: &[u8; 32], recipient_pub: &[u8; 32]) -> [u8; 24] {
+    let mut h = Sha256::new();
+    h.update(ephemeral_pub);
+    h.update(recipient_pub);
+    let digest = h.finalize();
+    let mut nonce = [0u8; 24];
+    nonce.copy_from_slice(&digest[..24]);
+    nonce
 }
 
 pub fn open_vault(vault_key: &SecretKey, blob: &[u8]) -> Result<Vec<u8>, CryptoError> {

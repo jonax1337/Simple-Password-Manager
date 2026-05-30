@@ -57,6 +57,10 @@ pub struct LoginResp {
     pub user_id: String,
     pub kdf_salt_b64: String,
     pub wrapped_master_key_b64: String,
+    #[serde(default)]
+    pub wrapped_account_privkey_b64: String,
+    #[serde(default)]
+    pub account_pubkey_b64: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -344,6 +348,62 @@ impl CloudClient {
         self.parse_unit(res).await
     }
 
+    pub async fn user_lookup(
+        &self,
+        token: &str,
+        email: &str,
+    ) -> Result<UserLookupResp, CloudError> {
+        let res = self
+            .http
+            .post(format!("{}/users/lookup", self.base_url))
+            .bearer_auth(token)
+            .json(&EmailOnlyReq {
+                email,
+                client_auth_hash: "x",
+            })
+            .send()
+            .await?;
+        self.parse_json(res).await
+    }
+
+    pub async fn share_vault(
+        &self,
+        token: &str,
+        vault_id: &str,
+        recipient_user_id: &str,
+        wrapped_vault_key_b64: &str,
+        role: &str,
+    ) -> Result<(), CloudError> {
+        let res = self
+            .http
+            .post(format!("{}/vaults/{}/share", self.base_url, vault_id))
+            .bearer_auth(token)
+            .json(&ShareReq {
+                recipient_user_id,
+                wrapped_vault_key_b64,
+                role,
+            })
+            .send()
+            .await?;
+        self.parse_unit(res).await
+    }
+
+    pub async fn unshare_vault(
+        &self,
+        token: &str,
+        vault_id: &str,
+        user_id: &str,
+    ) -> Result<(), CloudError> {
+        let res = self
+            .http
+            .delete(format!("{}/vaults/{}/share", self.base_url, vault_id))
+            .bearer_auth(token)
+            .json(&UnshareReq { user_id })
+            .send()
+            .await?;
+        self.parse_unit(res).await
+    }
+
     async fn parse_json<T: for<'de> Deserialize<'de>>(
         &self,
         res: reqwest::Response,
@@ -376,6 +436,24 @@ impl CloudClient {
             },
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserLookupResp {
+    pub user_id: String,
+    pub account_pubkey_b64: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ShareReq<'a> {
+    recipient_user_id: &'a str,
+    wrapped_vault_key_b64: &'a str,
+    role: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct UnshareReq<'a> {
+    user_id: &'a str,
 }
 
 /// Signup needs 10 wire fields. Bundling them into a struct keeps the

@@ -18,8 +18,9 @@ use simple_password_manager::cloud::{
     client::{CloudClient, CloudError, SignupArgs, VaultSummary},
     crypto::{
         self, b64_decode, b64_encode, derive_auth_hash, derive_password_key, derive_recovery_key,
-        generate_master_key, generate_recovery_code, new_kdf_salt, open_vault, seal_vault,
-        unwrap_key, wrap_key, SecretKey,
+        generate_account_keypair, generate_master_key, generate_recovery_code, new_kdf_salt,
+        open_vault, seal_vault, sealed_open, sealed_seal, unwrap_key, wrap_key, AccountKeypair,
+        SecretKey,
     },
     session::ActiveVault,
     CloudSession,
@@ -165,7 +166,15 @@ pub async fn cloud_signup(
     let recovery_key = derive_recovery_key(&recovery_code, &email).map_err(map_crypto_err)?;
     let recovery_blob = wrap_key(&recovery_key, &master_key).map_err(map_crypto_err)?;
 
-    // 3. First vault: random vault_key, wrap with master_key.
+    // 3. Curve25519 account keypair for future vault sharing. Wrap the
+    //    private half with master_key so any device can reproduce it after
+    //    login. Public half goes to the server in the clear.
+    let keypair = generate_account_keypair();
+    let privkey_secret =
+        SecretKey::from_bytes(*keypair.secret_bytes());
+    let wrapped_privkey = wrap_key(&master_key, &privkey_secret).map_err(map_crypto_err)?;
+
+    // 4. First vault: random vault_key, wrap with master_key.
     let vault_key = generate_master_key(); // same primitive — 32 random bytes
     let wrapped_vault_key = wrap_key(&master_key, &vault_key).map_err(map_crypto_err)?;
 
@@ -192,9 +201,8 @@ pub async fn cloud_signup(
             client_auth_hash: &b64_encode(auth_hash.as_bytes()),
             wrapped_master_key_b64: &b64_encode(&wrapped_master),
             recovery_blob_b64: &b64_encode(&recovery_blob),
-            // account_pubkey + privkey stay empty until sharing lands.
-            account_pubkey_b64: "",
-            wrapped_account_privkey_b64: "",
+            account_pubkey_b64: &b64_encode(&keypair.public_key),
+            wrapped_account_privkey_b64: &b64_encode(&wrapped_privkey),
             initial_vault_name: vault_name,
             initial_vault_blob_b64: &b64_encode(&sealed_vault),
             initial_wrapped_vault_key_b64: &b64_encode(&wrapped_vault_key),
@@ -221,6 +229,7 @@ pub async fn cloud_signup(
         resp.token,
         master_key,
     );
+    session.account_keypair = Some(keypair);
     session.active_vault = Some(ActiveVault {
         id: first_vault.id.clone(),
         name: first_vault.name,
@@ -260,16 +269,35 @@ pub async fn cloud_login(
         .await
         .map_err(map_cloud_err)?;
 
-    store_session(
-        &state,
-        CloudSession::new(
-            server_url.clone(),
-            email.clone(),
-            resp.user_id,
-            resp.token,
-            master_key,
-        ),
-    )?;
+    // Rehydrate the sharing keypair if the account has one. Pre-Stage-C
+    // accounts return empty strings here and just don't get keypair
+    // capability until they re-key.
+    let keypair = if !resp.wrapped_account_privkey_b64.is_empty()
+        && !resp.account_pubkey_b64.is_empty()
+    {
+        let wrapped = b64_decode(&resp.wrapped_account_privkey_b64).map_err(map_crypto_err)?;
+        let pubkey_bytes = b64_decode(&resp.account_pubkey_b64).map_err(map_crypto_err)?;
+        if pubkey_bytes.len() == 32 {
+            let privkey_secret = unwrap_key(&master_key, &wrapped).map_err(map_crypto_err)?;
+            let mut pk = [0u8; 32];
+            pk.copy_from_slice(&pubkey_bytes);
+            Some(AccountKeypair::from_bytes(pk, *privkey_secret.as_bytes()))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut session = CloudSession::new(
+        server_url.clone(),
+        email.clone(),
+        resp.user_id,
+        resp.token,
+        master_key,
+    );
+    session.account_keypair = keypair;
+    store_session(&state, session)?;
 
     Ok(CloudActionResp { email, server_url })
 }
@@ -361,10 +389,34 @@ pub async fn cloud_open_vault(
         .await
         .map_err(map_cloud_err)?;
 
-    // Reconstruct master_key briefly so we can unwrap the vault_key.
+    // Choose the right unwrap path: owners use master_key (AES-GCM wrap);
+    // shared members use the account_keypair (sealed_box). The server
+    // tells us which by the membership row's `role`.
     let master_key = SecretKey::from_bytes(master_bytes);
     let wrapped_vk = b64_decode(&full.wrapped_vault_key_b64).map_err(map_crypto_err)?;
-    let vault_key = unwrap_key(&master_key, &wrapped_vk).map_err(map_crypto_err)?;
+    let vault_key = if full.role == "owner" {
+        unwrap_key(&master_key, &wrapped_vk).map_err(map_crypto_err)?
+    } else {
+        let cloud = state
+            .cloud
+            .lock()
+            .map_err(|_| "cloud slot poisoned".to_string())?;
+        let s = cloud
+            .as_ref()
+            .ok_or_else(|| "Cloud account not linked".to_string())?;
+        let keypair = s.account_keypair.as_ref().ok_or_else(|| {
+            "Shared vault cannot be opened: this account has no sharing keypair. \
+             Sign up again or wait for the account-rekey flow."
+                .to_string()
+        })?;
+        let plaintext = sealed_open(keypair, &wrapped_vk).map_err(map_crypto_err)?;
+        if plaintext.len() != 32 {
+            return Err("unsealed vault_key is not 32 bytes".to_string());
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&plaintext);
+        SecretKey::from_bytes(arr)
+    };
 
     let sealed = b64_decode(&full.ciphertext_b64).map_err(map_crypto_err)?;
     let plaintext = open_vault(&vault_key, &sealed).map_err(map_crypto_err)?;
@@ -524,6 +576,102 @@ pub async fn cloud_delete_vault(
             }
         }
     }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct CloudUserLookupResp {
+    pub user_id: String,
+    pub account_pubkey_b64: String,
+}
+
+#[tauri::command]
+pub async fn cloud_lookup_user(
+    state: State<'_, AppState>,
+    email: String,
+) -> Result<CloudUserLookupResp, String> {
+    let (server_url, token, _) = snapshot_token_and_master(&state)?;
+    let client = CloudClient::new(server_url);
+    let resp = client
+        .user_lookup(&token, &email)
+        .await
+        .map_err(map_cloud_err)?;
+    Ok(CloudUserLookupResp {
+        user_id: resp.user_id,
+        account_pubkey_b64: resp.account_pubkey_b64,
+    })
+}
+
+/// Share a vault with another account. The caller must have the vault
+/// open (active) or at least have unwrapped its vault_key — we re-fetch
+/// it from the server and unwrap in-place. The wrapped_vault_key for the
+/// recipient is a sealed_box keyed by their account_pubkey.
+#[tauri::command]
+pub async fn cloud_share_vault(
+    state: State<'_, AppState>,
+    vault_id: String,
+    recipient_email: String,
+    role: String, // "editor" | "reader"
+) -> Result<(), String> {
+    let (server_url, token, master_bytes) = snapshot_token_and_master(&state)?;
+    let client = CloudClient::new(server_url);
+
+    // Look up recipient's pubkey first — fail fast if they don't exist
+    // or haven't enrolled for sharing.
+    let target = client
+        .user_lookup(&token, &recipient_email)
+        .await
+        .map_err(map_cloud_err)?;
+    if target.account_pubkey_b64.is_empty() {
+        return Err("Recipient has no sharing keypair — ask them to re-sign-in.".to_string());
+    }
+    let pubkey_bytes = b64_decode(&target.account_pubkey_b64).map_err(map_crypto_err)?;
+    if pubkey_bytes.len() != 32 {
+        return Err("Recipient pubkey is malformed".to_string());
+    }
+    let mut recipient_pk = [0u8; 32];
+    recipient_pk.copy_from_slice(&pubkey_bytes);
+
+    // Pull the vault to learn the wrapping for the *caller*. We have to
+    // unwrap to plaintext before re-sealing for the recipient.
+    let full = client
+        .get_vault(&token, &vault_id)
+        .await
+        .map_err(map_cloud_err)?;
+    if full.role != "owner" {
+        return Err("Only the owner can share a vault.".to_string());
+    }
+    let master_key = SecretKey::from_bytes(master_bytes);
+    let wrapped_vk = b64_decode(&full.wrapped_vault_key_b64).map_err(map_crypto_err)?;
+    let vault_key = unwrap_key(&master_key, &wrapped_vk).map_err(map_crypto_err)?;
+
+    let sealed = sealed_seal(&recipient_pk, vault_key.as_bytes()).map_err(map_crypto_err)?;
+
+    client
+        .share_vault(
+            &token,
+            &vault_id,
+            &target.user_id,
+            &b64_encode(&sealed),
+            role.as_str(),
+        )
+        .await
+        .map_err(map_cloud_err)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cloud_unshare_vault(
+    state: State<'_, AppState>,
+    vault_id: String,
+    user_id: String,
+) -> Result<(), String> {
+    let (server_url, token, _) = snapshot_token_and_master(&state)?;
+    let client = CloudClient::new(server_url);
+    client
+        .unshare_vault(&token, &vault_id, &user_id)
+        .await
+        .map_err(map_cloud_err)?;
     Ok(())
 }
 

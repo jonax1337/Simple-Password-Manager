@@ -102,6 +102,13 @@ pub struct LoginResp {
     pub user_id: String,
     pub kdf_salt_b64: String,
     pub wrapped_master_key_b64: String,
+    /// Curve25519 secret key encrypted with master_key, for unsealing
+    /// shared vaults. Empty for accounts that signed up before sharing
+    /// support landed.
+    pub wrapped_account_privkey_b64: String,
+    /// Curve25519 public key. Empty if the account didn't enroll for
+    /// sharing.
+    pub account_pubkey_b64: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -138,6 +145,38 @@ pub struct ResetReq {
 #[derive(Debug, Serialize)]
 pub struct ResetResp {
     pub token: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserLookupReq {
+    pub email: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UserLookupResp {
+    pub user_id: String,
+    pub account_pubkey_b64: String,
+}
+
+/// Find a recipient's user_id + account_pubkey by email so the caller can
+/// wrap a vault_key for sharing. Auth-gated: requires a valid token, but
+/// any logged-in user can look up any other. Tradeoff: lets users find
+/// each other to share, leaks account existence to insiders. Acceptable
+/// for the self-hosted single-tenant case; we'll revisit if/when we ship
+/// federation.
+pub async fn user_lookup(
+    State(state): State<AuthState>,
+    axum::extract::Extension(_caller): axum::extract::Extension<AuthenticatedUserId>,
+    Json(req): Json<UserLookupReq>,
+) -> ApiResult<Json<UserLookupResp>> {
+    let target = state
+        .storage
+        .find_share_target(&req.email)?
+        .ok_or(ApiError::NotFound)?;
+    Ok(Json(UserLookupResp {
+        user_id: target.0,
+        account_pubkey_b64: target.1,
+    }))
 }
 
 pub async fn signup(
@@ -203,6 +242,8 @@ pub async fn login(
         user_id: user.id,
         kdf_salt_b64: user.kdf_salt_b64,
         wrapped_master_key_b64: user.wrapped_master_key_b64,
+        wrapped_account_privkey_b64: user.wrapped_account_privkey_b64,
+        account_pubkey_b64: user.account_pubkey_b64,
     }))
 }
 

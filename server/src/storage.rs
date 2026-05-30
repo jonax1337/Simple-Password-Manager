@@ -531,16 +531,56 @@ impl Storage {
         Ok(())
     }
 
-    /// Add a membership row (for future sharing). Caller must have already
-    /// wrapped vault_key with the recipient's account_pubkey.
-    pub fn add_vault_member(
+    /// Lookup a recipient for a share invite. Returns the bits needed
+    /// client-side to wrap a vault_key (id + account_pubkey).
+    pub fn find_share_target(&self, email: &str) -> ApiResult<Option<(String, String)>> {
+        let conn = self.inner.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT id, account_pubkey_b64 FROM users WHERE email = ?1",
+                params![email],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        Ok(row.filter(|(_, pubkey)| !pubkey.is_empty()))
+    }
+
+    /// Add a membership row. Permission check: the caller must already own
+    /// the vault. We enforce that here instead of in the handler so an
+    /// editor (or a hypothetical bug) can't accidentally invite someone.
+    pub fn share_vault(
         &self,
+        caller_user_id: &str,
         membership: &VaultMembership,
     ) -> ApiResult<()> {
         let conn = self.inner.lock().unwrap();
-        conn.execute(
+        // Caller must be a member with admin rights on this vault.
+        let role_str: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![membership.vault_id, caller_user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let caller_role = role_str
+            .as_deref()
+            .and_then(VaultRole::parse)
+            .ok_or(ApiError::NotFound)?;
+        if !caller_role.can_admin() {
+            return Err(ApiError::Unauthorized);
+        }
+        // Recipient already a member? Update their wrapped key + role
+        // instead of failing. Re-sharing a vault should be idempotent —
+        // a new invite supersedes the old one (e.g. after recipient
+        // re-keyed).
+        let n = conn.execute(
             "INSERT INTO vault_members (vault_id, user_id, role, wrapped_vault_key_b64, invited_at, accepted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(vault_id, user_id) DO UPDATE SET
+                role = excluded.role,
+                wrapped_vault_key_b64 = excluded.wrapped_vault_key_b64,
+                invited_at = excluded.invited_at,
+                accepted_at = excluded.accepted_at",
             params![
                 membership.vault_id,
                 membership.user_id,
@@ -549,6 +589,53 @@ impl Storage {
                 membership.invited_at,
                 membership.accepted_at
             ],
+        )?;
+        if n == 0 {
+            return Err(ApiError::Internal("share insert produced 0 rows".into()));
+        }
+        Ok(())
+    }
+
+    /// Drop a member's access to a vault. Owners can't remove themselves —
+    /// they'd orphan the vault. Use delete_vault for that.
+    pub fn unshare_vault(
+        &self,
+        caller_user_id: &str,
+        vault_id: &str,
+        target_user_id: &str,
+    ) -> ApiResult<()> {
+        let conn = self.inner.lock().unwrap();
+        let caller_role: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, caller_user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let caller_role = caller_role
+            .as_deref()
+            .and_then(VaultRole::parse)
+            .ok_or(ApiError::NotFound)?;
+        // Either you're admin OR you're removing yourself.
+        if !caller_role.can_admin() && caller_user_id != target_user_id {
+            return Err(ApiError::Unauthorized);
+        }
+        // Refuse to remove the last owner.
+        let target_role: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, target_user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if matches!(target_role.as_deref().and_then(VaultRole::parse), Some(VaultRole::Owner)) {
+            return Err(ApiError::BadRequest(
+                "cannot remove the vault owner; delete the vault instead".into(),
+            ));
+        }
+        conn.execute(
+            "DELETE FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+            params![vault_id, target_user_id],
         )?;
         Ok(())
     }
@@ -650,14 +737,17 @@ mod tests {
         mk_user(&s, "owner", "o@x");
         mk_user(&s, "viewer", "v@x");
         let v = s.create_vault("owner", "v", "ct", "e1", "wvk").unwrap();
-        s.add_vault_member(&VaultMembership {
-            vault_id: v.id.clone(),
-            user_id: "viewer".into(),
-            role: VaultRole::Reader,
-            wrapped_vault_key_b64: "wvk-for-viewer".into(),
-            invited_at: 0,
-            accepted_at: Some(0),
-        })
+        s.share_vault(
+            "owner",
+            &VaultMembership {
+                vault_id: v.id.clone(),
+                user_id: "viewer".into(),
+                role: VaultRole::Reader,
+                wrapped_vault_key_b64: "wvk-for-viewer".into(),
+                invited_at: 0,
+                accepted_at: Some(0),
+            },
+        )
         .unwrap();
         let err = s
             .update_vault_ciphertext("viewer", &v.id, "ct2", "e2", Some("e1"))
@@ -671,14 +761,17 @@ mod tests {
         mk_user(&s, "owner", "o@x");
         mk_user(&s, "editor", "e@x");
         let v = s.create_vault("owner", "Old", "ct", "e1", "wvk").unwrap();
-        s.add_vault_member(&VaultMembership {
-            vault_id: v.id.clone(),
-            user_id: "editor".into(),
-            role: VaultRole::Editor,
-            wrapped_vault_key_b64: "wvk-e".into(),
-            invited_at: 0,
-            accepted_at: Some(0),
-        })
+        s.share_vault(
+            "owner",
+            &VaultMembership {
+                vault_id: v.id.clone(),
+                user_id: "editor".into(),
+                role: VaultRole::Editor,
+                wrapped_vault_key_b64: "wvk-e".into(),
+                invited_at: 0,
+                accepted_at: Some(0),
+            },
+        )
         .unwrap();
         assert!(matches!(
             s.rename_vault("editor", &v.id, "New").unwrap_err(),

@@ -43,6 +43,7 @@ sha2 = "0.10"
 # layer). They expose different APIs; we want this one for our Argon2id KDF
 # in cloud/crypto.rs.
 argon2-pure = { package = "argon2", version = "0.5" }
+crypto_box = { version = "0.9", features = ["std", "chacha20"] }
 
 # Windows Hello via Credential Manager + UserConsentVerifier. Only
 # pulled in on Windows; the lib stays cross-platform. Other targets

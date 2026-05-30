@@ -16,6 +16,10 @@ pub struct CloudSession {
     pub user_id: String,
     pub token: String,
     pub master_key: SecretKey,
+    /// Curve25519 keypair. Populated for sharing-capable accounts (any
+    /// signup since Stage C). Used to unseal shared `wrapped_vault_key`
+    /// blobs received via /vaults/:id/share.
+    pub account_keypair: Option<super::crypto::AccountKeypair>,
     pub active_vault: Option<ActiveVault>,
 }
 
@@ -42,6 +46,7 @@ impl CloudSession {
             user_id,
             token,
             master_key,
+            account_keypair: None,
             active_vault: None,
         }
     }

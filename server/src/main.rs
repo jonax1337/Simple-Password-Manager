@@ -107,6 +107,12 @@ fn build_app_inner(state: AuthState, rate_limit: bool) -> Router {
         .route("/vaults/{id}", put(vault::put_vault))
         .route("/vaults/{id}", axum::routing::patch(vault::rename_vault))
         .route("/vaults/{id}", axum::routing::delete(vault::delete_vault))
+        .route("/vaults/{id}/share", post(vault::share_vault))
+        .route(
+            "/vaults/{id}/share",
+            axum::routing::delete(vault::unshare_vault),
+        )
+        .route("/users/lookup", post(auth::user_lookup))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,

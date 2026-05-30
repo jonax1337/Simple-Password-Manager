@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{make_etag_for_blob, AuthState, AuthenticatedUserId};
 use crate::error::{ApiError, ApiResult};
-use crate::storage::VaultRole;
+use crate::storage::{VaultMembership, VaultRole};
 
 #[derive(Debug, Serialize)]
 pub struct VaultSummary {
@@ -204,4 +204,68 @@ pub async fn delete_vault(
 ) -> ApiResult<()> {
     state.storage.delete_vault(&user.0, &vault_id)?;
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ShareVaultReq {
+    /// The recipient's user_id (looked up via /users/lookup beforehand).
+    pub recipient_user_id: String,
+    /// `vault_key` sealed for the recipient — typically a libsodium-style
+    /// sealed_box using the recipient's `account_pubkey`. Opaque to the
+    /// server; we just store and return it.
+    pub wrapped_vault_key_b64: String,
+    pub role: VaultRole,
+}
+
+pub async fn share_vault(
+    State(state): State<AuthState>,
+    Extension(user): Extension<AuthenticatedUserId>,
+    Path(vault_id): Path<String>,
+    Json(req): Json<ShareVaultReq>,
+) -> ApiResult<()> {
+    if req.wrapped_vault_key_b64.is_empty() {
+        return Err(ApiError::BadRequest("wrapped_vault_key required".into()));
+    }
+    if req.recipient_user_id == user.0 {
+        return Err(ApiError::BadRequest(
+            "cannot share a vault with yourself".into(),
+        ));
+    }
+    let now = chrono_now_secs();
+    state.storage.share_vault(
+        &user.0,
+        &VaultMembership {
+            vault_id: vault_id.clone(),
+            user_id: req.recipient_user_id,
+            role: req.role,
+            wrapped_vault_key_b64: req.wrapped_vault_key_b64,
+            invited_at: now,
+            accepted_at: Some(now), // auto-accept for now; revisit when invite flow lands
+        },
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UnshareReq {
+    pub user_id: String,
+}
+
+pub async fn unshare_vault(
+    State(state): State<AuthState>,
+    Extension(user): Extension<AuthenticatedUserId>,
+    Path(vault_id): Path<String>,
+    Json(req): Json<UnshareReq>,
+) -> ApiResult<()> {
+    state
+        .storage
+        .unshare_vault(&user.0, &vault_id, &req.user_id)?;
+    Ok(())
+}
+
+fn chrono_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
