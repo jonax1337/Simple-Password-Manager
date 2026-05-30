@@ -2,6 +2,19 @@ import type { GroupData } from "./tauri";
 
 type Phase = "checking" | "unlock" | "quick-unlock" | "main";
 
+/**
+ * UI-visible sync state. Distinct from `isDirty` (which tracks in-memory edits
+ * relative to the last save) — `syncStatus` tracks our relationship with the
+ * on-disk file plus the optional cloud peer.
+ *
+ *   idle      — saved & no external activity
+ *   saving    — local save in flight
+ *   merging   — external change detected, pulling it in
+ *   conflict  — merge required user attention (DatabaseConflictDialog open)
+ *   cloud-sync — pushing to / pulling from a linked cloud account
+ */
+export type SyncStatus = "idle" | "saving" | "merging" | "conflict" | "cloud-sync";
+
 class AppState {
   phase = $state<Phase>("checking");
   rootGroup = $state<GroupData | null>(null);
@@ -11,6 +24,10 @@ class AppState {
   refreshCounter = $state<number>(0);
   // Increments on every markDirty() so debounced auto-save can re-arm.
   dirtyVersion = $state<number>(0);
+
+  syncStatus = $state<SyncStatus>("idle");
+  // ms-epoch of the last successful sync (save or merge). Null until first save.
+  lastSyncedAt = $state<number | null>(null);
 
   setPhase(p: Phase) {
     this.phase = p;
@@ -30,6 +47,14 @@ class AppState {
   }
   refresh() {
     this.refreshCounter += 1;
+  }
+  setSyncStatus(s: SyncStatus) {
+    this.syncStatus = s;
+  }
+  /** Successful save or merge: clear status, stamp the clock. */
+  markSynced() {
+    this.syncStatus = "idle";
+    this.lastSyncedAt = Date.now();
   }
 }
 

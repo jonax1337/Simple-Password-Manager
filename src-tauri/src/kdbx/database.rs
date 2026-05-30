@@ -1,16 +1,17 @@
 use argon2::Version as Argon2Version;
 use keepass::{
     config::{DatabaseConfig, KdfConfig},
-    db::{EntryId, GroupId},
+    db::{EntryId, GroupId, Times},
     ChallengeResponseKey, Database as KeepassDatabase, DatabaseKey,
 };
 use secrecy::{ExposeSecret, SecretString};
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
 use super::error::DatabaseError;
-use super::types::{KdfInfo, YubikeyConfig, YubikeyInfo};
+use super::types::{ConflictChoice, EntryConflict, KdfInfo, YubikeyConfig, YubikeyInfo};
 
 pub struct Database {
     pub db: KeepassDatabase,
@@ -316,6 +317,113 @@ impl Database {
             }
             Self::merge_into(target, source, *src_group_id, *src_group_id);
         }
+    }
+
+    /// Compare the in-memory DB against the on-disk version and return the
+    /// list of entries that exist in both but have diverging user-visible
+    /// fields. Used by the conflict-resolution dialog before a merge.
+    ///
+    /// Requires reading the on-disk file → a Yubikey touch when CR is
+    /// enabled. Callers should gate this behind `check_for_changes()` so
+    /// they don't burn a touch when nothing has changed.
+    pub fn analyze_conflicts(&self) -> Result<Vec<EntryConflict>, DatabaseError> {
+        let mut file = File::open(&self.path)
+            .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;
+        let key = build_key(&self.password, self.yubikey.as_ref())?;
+        let disk_db = KeepassDatabase::open(&mut file, key)
+            .map_err(|e| DatabaseError::OpenError(e.to_string()))?;
+
+        let mut conflicts = Vec::new();
+        for local_ref in self.db.iter_all_entries() {
+            let id = local_ref.id();
+            let Some(remote_ref) = disk_db.entry(id) else {
+                continue;
+            };
+
+            let local_group = local_ref.parent().id().uuid().to_string();
+            let remote_group = remote_ref.parent().id().uuid().to_string();
+            let local_data = Self::convert_entry(local_ref, &local_group);
+            let remote_data = Self::convert_entry(remote_ref, &remote_group);
+
+            if Self::entry_data_differs(&local_data, &remote_data) {
+                conflicts.push(EntryConflict {
+                    uuid: id.uuid().to_string(),
+                    local: local_data,
+                    remote: remote_data,
+                });
+            }
+        }
+        Ok(conflicts)
+    }
+
+    fn entry_data_differs(a: &super::types::EntryData, b: &super::types::EntryData) -> bool {
+        a.title != b.title
+            || a.username != b.username
+            || a.password != b.password
+            || a.url != b.url
+            || a.notes != b.notes
+            || a.tags != b.tags
+            || a.is_favorite != b.is_favorite
+            || a.icon_id != b.icon_id
+            || a.group_uuid != b.group_uuid
+            || a.custom_fields.len() != b.custom_fields.len()
+            || a.custom_fields.iter().zip(b.custom_fields.iter()).any(|(x, y)| {
+                x.name != y.name || x.value != y.value || x.protected != y.protected
+            })
+    }
+
+    /// Apply per-entry user decisions, then run the standard newer-wins merge
+    /// for everything else. Updates `last_modified` so subsequent change
+    /// detection works correctly.
+    pub fn resolve_and_merge(
+        &mut self,
+        decisions: HashMap<String, ConflictChoice>,
+    ) -> Result<(), DatabaseError> {
+        let mut file = File::open(&self.path)
+            .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;
+        let key = build_key(&self.password, self.yubikey.as_ref())?;
+        let disk_db = KeepassDatabase::open(&mut file, key)
+            .map_err(|e| DatabaseError::OpenError(e.to_string()))?;
+
+        // Apply per-entry choices BEFORE the generic merge. Touching
+        // last_modification on a "keep local" entry guarantees merge_into's
+        // newer-wins check leaves us alone. Copying remote fields onto a
+        // "keep remote" entry means the subsequent merge_into is a no-op
+        // for that entry (fields identical, times bumped to remote's).
+        for (uuid_str, choice) in &decisions {
+            let id = match Self::parse_entry_id(uuid_str) {
+                Ok(id) => id,
+                Err(_) => continue,
+            };
+            match choice {
+                ConflictChoice::KeepLocal => {
+                    if let Some(mut local) = self.db.entry_mut(id) {
+                        local.times.last_modification = Some(Times::now());
+                    }
+                }
+                ConflictChoice::KeepRemote => {
+                    let Some(remote) = disk_db.entry(id) else {
+                        continue;
+                    };
+                    let r = (*remote).clone();
+                    if let Some(mut local) = self.db.entry_mut(id) {
+                        local.fields = r.fields;
+                        local.tags = r.tags;
+                        local.times = r.times;
+                        local.custom_data = r.custom_data;
+                        local.history = r.history;
+                    }
+                }
+            }
+        }
+
+        let root_id = self.db.root().id();
+        Self::merge_into(&mut self.db, &disk_db, root_id, root_id);
+
+        self.last_modified = std::fs::metadata(&self.path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        Ok(())
     }
 
     pub fn get_kdf_info(&self) -> KdfInfo {

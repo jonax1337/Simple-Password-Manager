@@ -140,6 +140,50 @@ export async function mergeDatabase(): Promise<void> {
   return invoke("merge_database");
 }
 
+export type ConflictChoice = "keep_local" | "keep_remote";
+
+export interface EntryConflict {
+  uuid: string;
+  local: EntryData;
+  remote: EntryData;
+}
+
+export async function analyzeConflicts(): Promise<EntryConflict[]> {
+  return invoke("analyze_conflicts");
+}
+
+export async function resolveConflicts(
+  decisions: Record<string, ConflictChoice>,
+): Promise<void> {
+  return invoke("resolve_conflicts", { decisions });
+}
+
+export interface LockInfo {
+  pid: number;
+  host: string;
+  acquired_at: number;
+}
+
+export async function peekLockStatus(): Promise<LockInfo | null> {
+  return invoke("peek_lock_status");
+}
+
+/**
+ * `save_database` returns the string "LOCK_HELD:<host>:<pid>" when a fresh
+ * foreign lock blocked the save. Parses that into structured form, or returns
+ * null for any other error.
+ */
+export function parseLockHeldError(message: string): LockInfo | null {
+  if (!message.startsWith("LOCK_HELD:")) return null;
+  const rest = message.slice("LOCK_HELD:".length);
+  const lastColon = rest.lastIndexOf(":");
+  if (lastColon < 0) return null;
+  const host = rest.slice(0, lastColon);
+  const pid = Number(rest.slice(lastColon + 1));
+  if (!Number.isFinite(pid)) return null;
+  return { host, pid, acquired_at: 0 };
+}
+
 export async function closeDatabase(): Promise<void> {
   return invoke("close_database");
 }
@@ -285,4 +329,50 @@ export async function getInitialFilePath(): Promise<string | null> {
 
 export async function clearInitialFilePath(): Promise<void> {
   return invoke("clear_initial_file_path");
+}
+
+// Cloud sync
+
+export interface CloudStatus {
+  linked: boolean;
+  server_url: string | null;
+  email: string | null;
+  has_remote_vault: boolean;
+}
+
+export interface CloudActionResp {
+  email: string;
+  server_url: string;
+}
+
+export async function cloudStatus(): Promise<CloudStatus> {
+  return invoke("cloud_status");
+}
+
+export async function cloudSignup(
+  serverUrl: string,
+  email: string,
+  masterPassword: string,
+): Promise<CloudActionResp> {
+  return invoke("cloud_signup", { serverUrl, email, masterPassword });
+}
+
+export async function cloudLogin(
+  serverUrl: string,
+  email: string,
+  masterPassword: string,
+): Promise<CloudActionResp> {
+  return invoke("cloud_login", { serverUrl, email, masterPassword });
+}
+
+export async function cloudPush(): Promise<void> {
+  return invoke("cloud_push");
+}
+
+export async function cloudPull(): Promise<void> {
+  return invoke("cloud_pull");
+}
+
+export async function cloudDisconnect(): Promise<void> {
+  return invoke("cloud_disconnect");
 }

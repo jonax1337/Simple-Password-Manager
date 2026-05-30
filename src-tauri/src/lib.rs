@@ -7,6 +7,8 @@
 //! test binary to link against the WebView runtime.
 
 pub mod bridge;
+pub mod cloud;
 pub mod kdbx;
+pub mod lockfile;
 pub mod state;
 pub mod totp;

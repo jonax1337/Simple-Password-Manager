@@ -50,6 +50,8 @@ fn main() {
             database: Arc::new(Mutex::new(None)),
             initial_file_path: Mutex::new(None),
             dismissed_breaches: Mutex::new(HashMap::new()),
+            file_watcher: Mutex::new(None),
+            cloud: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::database::get_initial_file_path,
@@ -62,6 +64,9 @@ fn main() {
             commands::database::upgrade_kdf_parameters,
             commands::database::check_database_changes,
             commands::database::merge_database,
+            commands::database::analyze_conflicts,
+            commands::database::resolve_conflicts,
+            commands::database::peek_lock_status,
             commands::database::open_database_in_new_instance,
             commands::database::validate_database_file,
             commands::database::get_groups,
@@ -98,6 +103,12 @@ fn main() {
             commands::hello::hello_store,
             commands::hello::hello_retrieve,
             commands::hello::hello_clear,
+            commands::cloud::cloud_signup,
+            commands::cloud::cloud_login,
+            commands::cloud::cloud_push,
+            commands::cloud::cloud_pull,
+            commands::cloud::cloud_status,
+            commands::cloud::cloud_disconnect,
         ])
         .setup(|app| {
             // Set up system tray

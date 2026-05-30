@@ -8,6 +8,6 @@ mod types;
 
 pub use database::{list_available_yubikeys, Database};
 pub use types::{
-    CustomField, DashboardStats, EntryData, GroupData, HistoryEntry, KdfInfo, YubikeyConfig,
-    YubikeyInfo,
+    ConflictChoice, CustomField, DashboardStats, EntryConflict, EntryData, GroupData,
+    HistoryEntry, KdfInfo, YubikeyConfig, YubikeyInfo,
 };

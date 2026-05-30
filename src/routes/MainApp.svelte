@@ -20,13 +20,19 @@
     searchEntries,
     checkDatabaseChanges,
     mergeDatabase,
+    analyzeConflicts,
+    resolveConflicts,
+    parseLockHeldError,
     type GroupData,
     type EntryData,
+    type EntryConflict,
+    type ConflictChoice,
   } from "$lib/tauri";
   import { getCloseToTray } from "$lib/storage";
   import { appState } from "$lib/app-state.svelte";
   import { undoStack } from "$lib/undo-stack.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import EntryList from "$lib/components/EntryList.svelte";
   import EntryEditor from "$lib/components/EntryEditor.svelte";
@@ -35,6 +41,7 @@
   import SplitPane from "$lib/components/SplitPane.svelte";
   import UnsavedChangesDialog from "$lib/components/UnsavedChangesDialog.svelte";
   import DatabaseConflictDialog from "$lib/components/DatabaseConflictDialog.svelte";
+  import ConflictResolutionDialog from "$lib/components/ConflictResolutionDialog.svelte";
   import CommandPalette, { type PaletteCommand } from "$lib/components/CommandPalette.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import AboutDialog from "$lib/components/AboutDialog.svelte";
@@ -70,6 +77,8 @@
   let showUnsaved = $state(false);
   let closeAction = $state<"logout" | "window" | null>(null);
   let showConflict = $state(false);
+  let perEntryConflicts = $state<EntryConflict[]>([]);
+  let showPerEntryConflict = $state(false);
   let paletteOpen = $state(false);
   let settingsOpen = $state(false);
   let aboutOpen = $state(false);
@@ -136,24 +145,41 @@
     }
   });
 
-  // Background poll for *external* DB changes. Always on (no opt-in setting).
-  // If the file on disk diverged, merge it in silently — KeePass merges by UUID
-  // and is conflict-free in practice. We don't even toast; the UI just refreshes.
+  // External DB-change handler. The Rust side runs a `notify` watcher and
+  // emits `database-external-change` whenever the watched file or its parent
+  // directory changes. We re-verify the change via check_database_changes()
+  // (mtime diff) because some FS events fire for our own writes too.
+  //
+  // If a change is real and we're not dirty, silent-merge in the background.
+  // KeePass merges by UUID; surfacing conflict UI is the auto-save path's job.
   $effect(() => {
     if (!appState.dbPath) return;
-    const iv = setInterval(async () => {
-      if (appState.isDirty) return; // let the auto-save path handle it instead
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+
+    void listen<string>("database-external-change", async () => {
+      if (cancelled) return;
+      if (appState.isDirty) return; // auto-save flow handles merge during save
       try {
         const changed = await checkDatabaseChanges();
-        if (changed) {
-          await mergeDatabase();
-          appState.refresh();
-        }
+        if (!changed) return;
+        appState.setSyncStatus("merging");
+        await mergeDatabase();
+        appState.markSynced();
+        appState.refresh();
       } catch (e) {
-        console.error("Remote check failed", e);
+        console.error("External change merge failed", e);
+        appState.setSyncStatus("conflict");
       }
-    }, 3000);
-    return () => clearInterval(iv);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   });
 
   // Instant auto-save: whenever something mutated (dirtyVersion ticked), flush
@@ -180,18 +206,42 @@
     savePending = true;
     try {
       if (await checkDatabaseChanges()) {
+        appState.setSyncStatus("merging");
         try {
+          // Surface user-visible conflicts BEFORE a silent merge so the user
+          // can decide which version to keep. If no per-entry conflict
+          // (the common case — disjoint edits), proceed with newer-wins.
+          const conflicts = await analyzeConflicts();
+          if (conflicts.length > 0) {
+            perEntryConflicts = conflicts;
+            showPerEntryConflict = true;
+            appState.setSyncStatus("conflict");
+            return;
+          }
           await mergeDatabase();
           appState.refresh();
         } catch {
+          appState.setSyncStatus("conflict");
           showConflict = true;
           return;
         }
       }
+      appState.setSyncStatus("saving");
       await saveDatabase();
       appState.markClean();
+      appState.markSynced();
     } catch (e) {
-      toast.error("Auto-save failed", String(e));
+      const held = parseLockHeldError(String(e));
+      if (held) {
+        appState.setSyncStatus("conflict");
+        toast.error(
+          "Database in use",
+          `Lock held by ${held.host} (pid ${held.pid}). Auto-save will retry on next change.`,
+        );
+      } else {
+        appState.setSyncStatus("conflict");
+        toast.error("Auto-save failed", String(e));
+      }
     } finally {
       savePending = false;
       if (saveQueued) {
@@ -249,14 +299,23 @@
     try {
       const changed = await checkDatabaseChanges();
       if (changed) {
+        appState.setSyncStatus("conflict");
         showConflict = true;
         return;
       }
+      appState.setSyncStatus("saving");
       await saveDatabase();
       appState.markClean();
+      appState.markSynced();
       toast.success("Saved", "Database saved successfully");
     } catch (e) {
-      toast.error("Save failed", String(e));
+      const held = parseLockHeldError(String(e));
+      appState.setSyncStatus("conflict");
+      if (held) {
+        toast.error("Database in use", `Lock held by ${held.host} (pid ${held.pid}).`);
+      } else {
+        toast.error("Save failed", String(e));
+      }
     }
   }
 
@@ -300,13 +359,17 @@
 
   async function syncAndSave() {
     try {
+      appState.setSyncStatus("merging");
       await mergeDatabase();
       appState.refresh();
+      appState.setSyncStatus("saving");
       await saveDatabase();
       appState.markClean();
+      appState.markSynced();
       showConflict = false;
       toast.success("Synchronized", "Database synchronized and saved");
     } catch (e) {
+      appState.setSyncStatus("conflict");
       toast.error("Sync failed", String(e));
       showConflict = false;
     }
@@ -314,14 +377,42 @@
 
   async function overwriteSave() {
     try {
+      appState.setSyncStatus("saving");
       await saveDatabase();
       appState.markClean();
+      appState.markSynced();
       showConflict = false;
       toast.success("Saved");
     } catch (e) {
+      appState.setSyncStatus("conflict");
       toast.error("Save failed", String(e));
       showConflict = false;
     }
+  }
+
+  async function applyPerEntryDecisions(decisions: Record<string, ConflictChoice>) {
+    try {
+      appState.setSyncStatus("merging");
+      await resolveConflicts(decisions);
+      appState.refresh();
+      appState.setSyncStatus("saving");
+      await saveDatabase();
+      appState.markClean();
+      appState.markSynced();
+      showPerEntryConflict = false;
+      perEntryConflicts = [];
+      toast.success("Conflicts resolved", "Database synchronized");
+    } catch (e) {
+      appState.setSyncStatus("conflict");
+      toast.error("Resolve failed", String(e));
+    }
+  }
+
+  function cancelPerEntryConflict() {
+    showPerEntryConflict = false;
+    perEntryConflicts = [];
+    // Status stays "conflict" until next successful save attempt — the pill
+    // keeps showing the user there's still unresolved divergence.
   }
 
   function isEditable(el: EventTarget | null): boolean {
@@ -547,4 +638,11 @@
   onSynchronize={syncAndSave}
   onOverwrite={overwriteSave}
   onCancel={() => (showConflict = false)}
+/>
+
+<ConflictResolutionDialog
+  bind:open={showPerEntryConflict}
+  conflicts={perEntryConflicts}
+  onResolve={applyPerEntryDecisions}
+  onCancel={cancelPerEntryConflict}
 />

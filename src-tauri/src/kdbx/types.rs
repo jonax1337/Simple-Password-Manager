@@ -76,6 +76,23 @@ pub struct YubikeyInfo {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub struct EntryConflict {
+    pub uuid: String,
+    pub local: EntryData,
+    pub remote: EntryData,
+}
+
+/// Per-entry user decision when resolving a sync conflict. `KeepLocal` forces
+/// the in-memory version to win the next merge; `KeepRemote` copies the
+/// on-disk fields onto the in-memory entry before merging.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictChoice {
+    KeepLocal,
+    KeepRemote,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DashboardStats {
     pub total_entries: usize,
     pub total_groups: usize,

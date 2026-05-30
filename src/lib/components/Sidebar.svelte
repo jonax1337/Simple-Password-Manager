@@ -7,6 +7,7 @@
   import { appState } from "$lib/app-state.svelte";
   import { IconButton, Eyebrow, Tooltip } from "$lib/ui";
   import { navRow } from "$lib/ui/recipes";
+  import { onMount } from "svelte";
 
   type Props = {
     rootGroup: GroupData | null;
@@ -33,6 +34,63 @@
   const dbFileName = $derived(appState.dbPath ? appState.dbPath.split(/[\\/]/).pop() ?? "Vault" : "Vault");
   const dbDisplayName = $derived(dbFileName.replace(/\.kdbx$/i, ""));
 
+  // Cheap ticker so the relative "X seconds ago" label refreshes without
+  // forcing every appState mutation to bump a counter.
+  let now = $state(Date.now());
+  onMount(() => {
+    const iv = setInterval(() => (now = Date.now()), 5000);
+    return () => clearInterval(iv);
+  });
+
+  function relativeTime(ms: number, ref: number): string {
+    const s = Math.max(0, Math.round((ref - ms) / 1000));
+    if (s < 5) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+  }
+
+  type Pill = { dotClass: string; label: string; title?: string };
+
+  const syncPill: Pill = $derived.by(() => {
+    // Priority: dirty > active transitions > idle. `isDirty` is the strongest
+    // signal of "work in progress" — even if status briefly settles to idle
+    // between debounced saves, we want the pill to keep showing pending work.
+    if (appState.isDirty) {
+      return {
+        dotClass: "bg-warning animate-pulse-soft",
+        label: "Unsaved changes",
+      };
+    }
+    switch (appState.syncStatus) {
+      case "saving":
+        return { dotClass: "bg-warning animate-pulse-soft", label: "Saving…" };
+      case "merging":
+        return { dotClass: "bg-primary animate-pulse-soft", label: "Merging…" };
+      case "cloud-sync":
+        return { dotClass: "bg-primary animate-pulse-soft", label: "Syncing cloud…" };
+      case "conflict":
+        return {
+          dotClass: "bg-destructive",
+          label: "Sync needs attention",
+        };
+      case "idle":
+      default: {
+        if (appState.lastSyncedAt === null) {
+          return { dotClass: "bg-success/70", label: "Ready" };
+        }
+        return {
+          dotClass: "bg-success/70",
+          label: `Synced ${relativeTime(appState.lastSyncedAt, now)}`,
+          title: new Date(appState.lastSyncedAt).toLocaleString(),
+        };
+      }
+    }
+  });
+
   type NavItem = { id: string; label: string; icon: typeof Home };
   const navItems: NavItem[] = [
     { id: "_dashboard", label: "Home", icon: Home },
@@ -53,14 +111,12 @@
       </div>
       <div class="min-w-0 flex-1">
         <div class="text-sm font-semibold truncate leading-tight">{dbDisplayName}</div>
-        <div class="text-2xs text-muted-foreground flex items-center gap-1.5">
-          {#if appState.isDirty}
-            <span class="inline-block size-1.5 rounded-full bg-warning animate-pulse-soft"></span>
-            <span>Saving…</span>
-          {:else}
-            <span class="inline-block size-1.5 rounded-full bg-success/70"></span>
-            <span>All changes saved</span>
-          {/if}
+        <div
+          class="text-2xs text-muted-foreground flex items-center gap-1.5"
+          title={syncPill.title}
+        >
+          <span class="inline-block size-1.5 rounded-full {syncPill.dotClass}"></span>
+          <span class="truncate">{syncPill.label}</span>
         </div>
       </div>
     </div>

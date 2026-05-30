@@ -1,10 +1,91 @@
-use simple_password_manager::kdbx::{Database, GroupData, KdfInfo, YubikeyConfig};
+use simple_password_manager::kdbx::{
+    ConflictChoice, Database, EntryConflict, GroupData, KdfInfo, YubikeyConfig,
+};
+use std::collections::HashMap;
+use simple_password_manager::lockfile::{self, LockError, LockInfo};
 use simple_password_manager::state::AppState;
+use notify::{event::ModifyKind, EventKind, RecursiveMode, Watcher};
 use std::io::Read;
 use std::path::PathBuf;
-use tauri::State;
+use tauri::{Emitter, State, AppHandle};
 use std::process::Command;
 use std::fs::File;
+use std::time::{Duration, Instant};
+use std::sync::Mutex as StdMutex;
+
+/// Debounce window for raw FS events. Cloud sync clients (OneDrive, Dropbox)
+/// often touch the file multiple times during a single "save" — a 250ms
+/// quiet window collapses those into one frontend event.
+const WATCHER_DEBOUNCE_MS: u64 = 250;
+
+/// Start a `notify` watcher on `path`. Emits a Tauri event `database-external-change`
+/// (debounced) to the frontend. Replaces any previously-installed watcher.
+fn install_watcher(state: &AppState, app: AppHandle, path: PathBuf) -> Result<(), String> {
+    let last_emit: StdMutex<Instant> = StdMutex::new(
+        Instant::now() - Duration::from_secs(60),
+    );
+    let app_for_cb = app.clone();
+    let watched_path = path.clone();
+
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        let Ok(event) = res else { return };
+        // Filter: only react to Modify/Create/Remove. Skip pure metadata noise.
+        let interesting = matches!(
+            event.kind,
+            EventKind::Modify(ModifyKind::Data(_))
+                | EventKind::Modify(ModifyKind::Any)
+                | EventKind::Modify(ModifyKind::Name(_))
+                | EventKind::Create(_)
+                | EventKind::Remove(_)
+        );
+        if !interesting {
+            return;
+        }
+        // Cloud sync clients often rename-into-place, so the watched path
+        // sometimes shows up in event.paths and sometimes the parent does.
+        // We re-check the file's mtime in the frontend anyway, so we don't
+        // need to be picky here — only debounce.
+        let mut last = match last_emit.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        let now = Instant::now();
+        if now.duration_since(*last) < Duration::from_millis(WATCHER_DEBOUNCE_MS) {
+            return;
+        }
+        *last = now;
+        drop(last);
+        let _ = app_for_cb.emit(
+            "database-external-change",
+            watched_path.to_string_lossy().to_string(),
+        );
+    })
+    .map_err(|e| format!("Failed to create file watcher: {}", e))?;
+
+    // Watch the parent dir non-recursively. Some editors (and cloud clients)
+    // replace the file rather than modifying it in place — watching the file
+    // directly would lose events after the inode swap. Watching the parent
+    // catches both the in-place and replace cases.
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Database path has no parent directory".to_string())?;
+    watcher
+        .watch(parent, RecursiveMode::NonRecursive)
+        .map_err(|e| format!("Failed to watch DB directory: {}", e))?;
+
+    let mut slot = state
+        .file_watcher
+        .lock()
+        .map_err(|_| "watcher slot poisoned".to_string())?;
+    *slot = Some(watcher);
+    Ok(())
+}
+
+fn uninstall_watcher(state: &AppState) {
+    if let Ok(mut slot) = state.file_watcher.lock() {
+        *slot = None;
+    }
+}
 
 #[tauri::command]
 pub fn get_initial_file_path(state: State<AppState>) -> Option<String> {
@@ -30,12 +111,14 @@ pub fn clear_initial_file_path(state: State<AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn create_database(
+    app: AppHandle,
     state: State<AppState>,
     path: String,
     password: String,
     yubikey: Option<YubikeyConfig>,
 ) -> Result<GroupData, String> {
-    let db = Database::create_with_yubikey(PathBuf::from(&path), password, yubikey)
+    let path_buf = PathBuf::from(&path);
+    let db = Database::create_with_yubikey(path_buf.clone(), password, yubikey)
         .map_err(|e| e.to_string())?;
 
     let root_group = db.get_root_group();
@@ -46,12 +129,20 @@ pub fn create_database(
             "Failed to access database state".to_string()
         })?;
     *database_lock = Some(db);
+    drop(database_lock);
+
+    // Best-effort watcher install. A missing watcher only degrades the
+    // sync UX (frontend falls back to mtime polling), so we log and continue.
+    if let Err(e) = install_watcher(&state, app, path_buf) {
+        eprintln!("create_database: watcher install failed: {}", e);
+    }
 
     Ok(root_group)
 }
 
 #[tauri::command]
 pub fn open_database(
+    app: AppHandle,
     state: State<AppState>,
     path: String,
     password: String,
@@ -69,6 +160,11 @@ pub fn open_database(
             "Failed to access database state".to_string()
         })?;
     *database_lock = Some(db);
+    drop(database_lock);
+
+    if let Err(e) = install_watcher(&state, app, path_buf) {
+        eprintln!("open_database: watcher install failed: {}", e);
+    }
 
     Ok((root_group, path))
 }
@@ -82,8 +178,33 @@ pub fn save_database(state: State<AppState>) -> Result<(), String> {
         })?;
 
     if let Some(db) = database_lock.as_mut() {
-        db.save().map_err(|e| e.to_string())?;
-        Ok(())
+        // Acquire a lock around the actual write. Foreign locks fail fast
+        // with a peer hint so the frontend can show "Alice is editing".
+        // Stale foreign locks (crashed peer) are stolen transparently.
+        match lockfile::acquire_lock(&db.path) {
+            Ok(_) => {}
+            Err(LockError::HeldByPeer(host, pid)) => {
+                return Err(format!("LOCK_HELD:{}:{}", host, pid));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+        let result = db.save().map_err(|e| e.to_string());
+        let _ = lockfile::release_lock(&db.path);
+        result
+    } else {
+        Err("No database loaded".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn peek_lock_status(state: State<AppState>) -> Result<Option<LockInfo>, String> {
+    let database_lock = state.database.lock()
+        .map_err(|e| {
+            eprintln!("peek_lock_status: Lock poisoned: {}", e);
+            "Failed to access database state".to_string()
+        })?;
+    if let Some(db) = database_lock.as_ref() {
+        Ok(lockfile::peek_foreign_lock(&db.path))
     } else {
         Err("No database loaded".to_string())
     }
@@ -96,7 +217,16 @@ pub fn close_database(state: State<AppState>) -> Result<(), String> {
             eprintln!("close_database: Lock poisoned: {}", e);
             "Failed to access database state".to_string()
         })?;
+    if let Some(db) = database_lock.as_ref() {
+        let _ = simple_password_manager::lockfile::release_lock(&db.path);
+    }
     *database_lock = None;
+    drop(database_lock);
+    uninstall_watcher(&state);
+    // Drop cloud session too — a new vault should re-link explicitly.
+    if let Ok(mut cloud) = state.cloud.lock() {
+        *cloud = None;
+    }
     Ok(())
 }
 
@@ -184,6 +314,38 @@ pub fn validate_database_file(path: String) -> Result<bool, String> {
         && magic_bytes[3] == 0x9A;
     
     Ok(valid)
+}
+
+#[tauri::command]
+pub fn analyze_conflicts(state: State<AppState>) -> Result<Vec<EntryConflict>, String> {
+    let database_lock = state.database.lock()
+        .map_err(|e| {
+            eprintln!("analyze_conflicts: Lock poisoned: {}", e);
+            "Failed to access database state".to_string()
+        })?;
+    if let Some(db) = database_lock.as_ref() {
+        db.analyze_conflicts().map_err(|e| e.to_string())
+    } else {
+        Err("No database loaded".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn resolve_conflicts(
+    state: State<AppState>,
+    decisions: HashMap<String, ConflictChoice>,
+) -> Result<(), String> {
+    let mut database_lock = state.database.lock()
+        .map_err(|e| {
+            eprintln!("resolve_conflicts: Lock poisoned: {}", e);
+            "Failed to access database state".to_string()
+        })?;
+    if let Some(db) = database_lock.as_mut() {
+        db.resolve_and_merge(decisions).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("No database loaded".to_string())
+    }
 }
 
 #[tauri::command]

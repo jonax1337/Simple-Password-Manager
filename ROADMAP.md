@@ -1,12 +1,16 @@
 # Roadmap — Richtung 1Password
 
-Stand: 2026-05-29. Ziel: Von "lokaler KeePass-Client" zu vollwertiger Password-Suite (Desktop + Browser + Sync). Phasen sind so geordnet, dass jede für sich abgeschlossen ist und keine spätere Phase blockiert.
+Stand: 2026-05-30. Ziel: Von "lokaler KeePass-Client" zu vollwertiger Password-Suite (Desktop + Browser + Sync). Phasen sind so geordnet, dass jede für sich abgeschlossen ist und keine spätere Phase blockiert.
 
 ## Status
 
 - **Phase 1 (Quick Wins): ✅ ausgeliefert** — Close-to-Tray, Autostart, Update-Workflow, signed Bundles.
-- **v2.0 (Mai 2026): ✅ ausgeliefert** — kompletter Frontend-Rewrite von Next.js/React → **Svelte 5 + Vite**, 1Password-Stil 3-Pane-Layout, Read-Mode-Detail mit Edit-Toggle, Auto-Save, Command Palette (`Ctrl+K`), Settings als Dialog, Live-Updates über alle Panes, neue Indigo-Violett-Palette, DnD voll funktional. Dateipfade in den älteren Phasen-Notizen unten (`components/Settings.tsx`, `lib/storage.ts` etc.) sind aus der React-Ära — die Funktionen leben jetzt unter `src/lib/` und `src/lib/components/`.
-- **Nächste Schritte:** Phase 2 (Performance-Profiling auf der Svelte-Codebase), dann Phase 3 (Browser Extension).
+- **v2.0 (Mai 2026): ✅ ausgeliefert** — kompletter Frontend-Rewrite von Next.js/React → **Svelte 5 + Vite**.
+- **Phase 2 (Performance): ✅ Profiling abgeschlossen.**
+- **Phase 3 (Browser Extension): ✅ ausgeliefert** — KeePassXC-kompatibler Native-Messaging-Host, Bridge-HTTP-Server, Auto-Fill/Save-Prompt MVP.
+- **Phase 4 (Cloud-Ordner-Sync): ✅ ausgeliefert (2026-05-30)** — siehe unten, Implementation in `src-tauri/src/lockfile.rs`, `src-tauri/src/commands/database.rs` (notify-watcher), `src/lib/components/ConflictResolutionDialog.svelte`.
+- **Phase 5 (Eigener Sync-Server): ⚠️ MVP-Skelett (2026-05-30)** — `server/` crate (Axum + SQLite + JWT), E2E-Crypto in `src-tauri/src/cloud/`, Cloud-Tab in Settings. Bewusst NICHT produktionsreif: keine Recovery-Codes, keine Rate-Limits, kein automatisches Onboarding für neue Geräte. Siehe `server/README.md` für Threat-Model + Self-Hosting.
+- **Dateipfade in den älteren Phasen-Notizen unten** (`components/Settings.tsx`, `lib/storage.ts` etc.) sind aus der React-Ära — die Funktionen leben jetzt unter `src/lib/` und `src/lib/components/`.
 
 ---
 

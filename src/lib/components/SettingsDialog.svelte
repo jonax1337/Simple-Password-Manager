@@ -10,6 +10,7 @@
     Palette, Shield, Database, Settings as SettingsIcon, Info,
     Sun, Moon, Monitor, Lock, ShieldAlert, RefreshCw,
     KeyRound, Fingerprint, Rocket, Puzzle, Trash2, Heart, ExternalLink,
+    Cloud, CloudOff, ArrowUpFromLine, ArrowDownToLine,
   } from "@lucide/svelte";
   import { theme, type ThemeMode } from "$lib/theme.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
@@ -32,9 +33,16 @@
     helloIsEnrolled,
     helloStore,
     helloClear,
+    cloudStatus,
+    cloudSignup,
+    cloudLogin,
+    cloudPush,
+    cloudPull,
+    cloudDisconnect,
     type BrowserInfo,
     type InstallReport,
     type YubikeyInfo,
+    type CloudStatus,
   } from "$lib/tauri";
   import {
     getHibpEnabled,
@@ -45,7 +53,7 @@
   } from "$lib/storage";
   import { appState } from "$lib/app-state.svelte";
 
-  type SectionId = "appearance" | "security" | "database" | "application" | "about";
+  type SectionId = "appearance" | "security" | "database" | "cloud" | "application" | "about";
 
   type Props = {
     open?: boolean;
@@ -63,6 +71,7 @@
     { id: "appearance", label: "Appearance", icon: Palette },
     { id: "security", label: "Security", icon: Shield },
     { id: "database", label: "Database", icon: Database },
+    { id: "cloud", label: "Cloud Sync", icon: Cloud },
     { id: "application", label: "Application", icon: SettingsIcon },
     { id: "about", label: "About", icon: Info },
   ];
@@ -106,6 +115,101 @@
   let helloBusy = $state(false);
   let helloError = $state("");
 
+  // ---------- cloud sync ----------
+  let cloudState = $state<CloudStatus>({
+    linked: false,
+    server_url: null,
+    email: null,
+    has_remote_vault: false,
+  });
+  let cloudMode = $state<"signup" | "login">("login");
+  let cloudServerUrl = $state(
+    typeof window !== "undefined"
+      ? localStorage.getItem("cloudServerUrl") ?? "http://localhost:8090"
+      : "http://localhost:8090",
+  );
+  let cloudEmail = $state(
+    typeof window !== "undefined" ? localStorage.getItem("cloudEmail") ?? "" : "",
+  );
+  let cloudPassword = $state("");
+  let cloudBusy = $state(false);
+  let cloudError = $state("");
+
+  async function refreshCloudStatus() {
+    try {
+      cloudState = await cloudStatus();
+    } catch {
+      // ignore — settings UI shouldn't block on it
+    }
+  }
+
+  async function applyCloudLink() {
+    cloudBusy = true;
+    cloudError = "";
+    try {
+      if (cloudMode === "signup") {
+        await cloudSignup(cloudServerUrl, cloudEmail, cloudPassword);
+        toast.success("Cloud account created", "Vault uploaded");
+      } else {
+        await cloudLogin(cloudServerUrl, cloudEmail, cloudPassword);
+        toast.success("Linked", `Signed in as ${cloudEmail}`);
+      }
+      localStorage.setItem("cloudServerUrl", cloudServerUrl);
+      localStorage.setItem("cloudEmail", cloudEmail);
+      cloudPassword = "";
+      await refreshCloudStatus();
+    } catch (e) {
+      cloudError = String(e);
+    } finally {
+      cloudBusy = false;
+    }
+  }
+
+  async function doCloudPush() {
+    cloudBusy = true;
+    cloudError = "";
+    try {
+      appState.setSyncStatus("cloud-sync");
+      await cloudPush();
+      appState.markSynced();
+      toast.success("Pushed", "Local vault uploaded");
+      await refreshCloudStatus();
+    } catch (e) {
+      appState.setSyncStatus("conflict");
+      cloudError = String(e);
+    } finally {
+      cloudBusy = false;
+    }
+  }
+
+  async function doCloudPull() {
+    cloudBusy = true;
+    cloudError = "";
+    try {
+      appState.setSyncStatus("cloud-sync");
+      await cloudPull();
+      appState.markSynced();
+      appState.refresh();
+      toast.success("Pulled", "Remote vault written to disk — reopen to load new contents");
+      await refreshCloudStatus();
+    } catch (e) {
+      appState.setSyncStatus("conflict");
+      cloudError = String(e);
+    } finally {
+      cloudBusy = false;
+    }
+  }
+
+  async function doCloudDisconnect() {
+    try {
+      await cloudDisconnect();
+      await refreshCloudStatus();
+      toast.success("Disconnected");
+    } catch (e) {
+      toast.error("Failed", String(e));
+    }
+  }
+
   // ---------- about ----------
   let version = $state("…");
 
@@ -122,6 +226,7 @@
       helloIsEnrolled(appState.dbPath).then((v) => (helloEnrolled = v)).catch(() => (helloEnrolled = false));
     }
     getVersion().then((v) => (version = v)).catch(() => (version = "unknown"));
+    void refreshCloudStatus();
   });
 
   function applyTheme(v: string) { theme.set(v as ThemeMode); }
@@ -346,6 +451,107 @@
                   <p class="text-xs text-muted-foreground break-all font-mono">{appState.dbPath}</p>
                 {/if}
               </SettingsRow>
+            </div>
+          {:else if section === "cloud"}
+            <div class="space-y-6 max-w-lg">
+              <div class="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+                <p class="font-medium text-foreground">End-to-end encrypted sync</p>
+                <p>
+                  Your master password never leaves this device. The server stores only an
+                  Argon2-hashed proof of it plus the AES-GCM-encrypted vault blob. Run your own
+                  instance — see <span class="font-mono">server/README.md</span>.
+                </p>
+              </div>
+
+              {#if cloudState.linked}
+                <SettingsRow
+                  icon={Cloud}
+                  title="Linked account"
+                  description="This session is connected to a cloud account."
+                >
+                  <div class="space-y-2">
+                    <p class="text-xs font-mono break-all">{cloudState.email}</p>
+                    <p class="text-2xs text-muted-foreground break-all">{cloudState.server_url}</p>
+                    <div class="flex gap-2 pt-1">
+                      <Button size="sm" onclick={doCloudPush} disabled={cloudBusy}>
+                        <ArrowUpFromLine class="size-3.5" />
+                        Push
+                      </Button>
+                      <Button size="sm" variant="outline" onclick={doCloudPull} disabled={cloudBusy}>
+                        <ArrowDownToLine class="size-3.5" />
+                        Pull
+                      </Button>
+                      <Button size="sm" variant="outline" onclick={doCloudDisconnect} disabled={cloudBusy}>
+                        <CloudOff class="size-3.5" />
+                        Disconnect
+                      </Button>
+                    </div>
+                  </div>
+                </SettingsRow>
+              {:else}
+                <SettingsRow
+                  icon={Cloud}
+                  title="Link this vault to a server"
+                  description={cloudMode === "signup"
+                    ? "Creates a new server-side account using this database as the initial vault."
+                    : "Sign in to an existing server account. Your local vault will be replaced on Pull."}
+                >
+                  <div class="space-y-3">
+                    <div class="flex gap-1 text-xs">
+                      <button
+                        type="button"
+                        class="px-2.5 py-1 rounded border {cloudMode === 'login' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-accent/40'}"
+                        onclick={() => (cloudMode = "login")}
+                      >
+                        Sign in
+                      </button>
+                      <button
+                        type="button"
+                        class="px-2.5 py-1 rounded border {cloudMode === 'signup' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-accent/40'}"
+                        onclick={() => (cloudMode = "signup")}
+                      >
+                        Create account
+                      </button>
+                    </div>
+
+                    <div class="space-y-1.5">
+                      <Label for="cloud-server">Server URL</Label>
+                      <Input id="cloud-server" bind:value={cloudServerUrl} placeholder="https://vault.example.com" />
+                    </div>
+                    <div class="space-y-1.5">
+                      <Label for="cloud-email">Email</Label>
+                      <Input id="cloud-email" type="email" bind:value={cloudEmail} placeholder="you@example.com" />
+                    </div>
+                    <div class="space-y-1.5">
+                      <Label for="cloud-pw">Master password</Label>
+                      <Input
+                        id="cloud-pw"
+                        type="password"
+                        bind:value={cloudPassword}
+                        placeholder="••••••••"
+                      />
+                      <p class="text-2xs text-muted-foreground">
+                        Used to derive your vault encryption key. Reuse the database's master
+                        password to keep things simple.
+                      </p>
+                    </div>
+
+                    <Button onclick={applyCloudLink} disabled={cloudBusy || !cloudPassword || !cloudEmail || !cloudServerUrl}>
+                      {#if cloudBusy}
+                        Working…
+                      {:else if cloudMode === "signup"}
+                        Create &amp; upload vault
+                      {:else}
+                        Sign in
+                      {/if}
+                    </Button>
+                  </div>
+                </SettingsRow>
+              {/if}
+
+              {#if cloudError}
+                <p class="text-xs text-destructive break-all">{cloudError}</p>
+              {/if}
             </div>
           {:else if section === "application"}
             <div class="space-y-8 max-w-md">
