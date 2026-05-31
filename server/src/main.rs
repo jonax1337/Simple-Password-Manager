@@ -119,6 +119,11 @@ fn build_app_inner(state: AuthState, rate_limit: bool) -> Router {
             "/vaults/{id}/share",
             axum::routing::delete(vault::unshare_vault),
         )
+        .route("/vaults/{id}/members", get(vault::list_members))
+        .route(
+            "/vaults/{id}/members/{user_id}",
+            axum::routing::patch(vault::update_member_role),
+        )
         .route("/users/lookup", post(auth::user_lookup))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

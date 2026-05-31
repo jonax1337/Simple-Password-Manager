@@ -4,7 +4,10 @@
   import { cn } from "$lib/utils";
 
   type Props = {
-    onSelect?: () => void;
+    /** Selection callback. Receives the underlying event so callers can
+     * `event.preventDefault()` to keep the menu open after the action
+     * (useful for "Refresh"-style items that update list contents). */
+    onSelect?: (event: Event) => void;
     disabled?: boolean;
     destructive?: boolean;
     class?: string;
@@ -16,7 +19,7 @@
 
 <Menu.Item
   {disabled}
-  onSelect={() => onSelect?.()}
+  onSelect={(e) => onSelect?.(e)}
   class={cn(
     "data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none [&_svg]:size-4 [&_svg]:shrink-0",
     destructive &&

@@ -15,7 +15,7 @@
 
 use serde::Serialize;
 use simple_password_manager::cloud::{
-    client::{CloudClient, CloudError, SignupArgs, VaultSummary},
+    client::{CloudClient, CloudError, MemberRow, SignupArgs, VaultSummary},
     crypto::{
         self, b64_decode, b64_encode, derive_auth_hash, derive_password_key, derive_recovery_key,
         generate_account_keypair, generate_master_key, generate_recovery_code, new_kdf_salt,
@@ -37,8 +37,13 @@ pub struct CloudStatusResp {
     pub linked: bool,
     pub server_url: Option<String>,
     pub email: Option<String>,
+    pub user_id: Option<String>,
     pub active_vault_id: Option<String>,
     pub active_vault_name: Option<String>,
+    /// Caller's role on the active vault ("owner" / "editor" / "reader").
+    /// Frontend uses this to lock the UI in read-only mode and gate
+    /// admin controls.
+    pub active_vault_role: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -249,6 +254,7 @@ pub async fn cloud_signup(
         id: first_vault.id.clone(),
         name: first_vault.name,
         vault_key,
+        role: first_vault.role,
         last_known_etag: Some(first_vault.etag),
     });
     store_session(&state, session)?;
@@ -465,6 +471,7 @@ pub async fn cloud_open_vault(
             id: full.id,
             name: full.name,
             vault_key,
+            role: full.role,
             last_known_etag: Some(full.etag),
         });
     }
@@ -642,6 +649,7 @@ pub async fn cloud_create_vault(
                 id: resp.id.clone(),
                 name: trimmed,
                 vault_key,
+                role: "owner".to_string(),
                 last_known_etag: Some(resp.etag),
             });
         }
@@ -783,6 +791,36 @@ pub async fn cloud_unshare_vault(
 }
 
 #[tauri::command]
+pub async fn cloud_list_members(
+    state: State<'_, AppState>,
+    vault_id: String,
+) -> Result<Vec<MemberRow>, String> {
+    let (server_url, token, _) = snapshot_token_and_master(&state)?;
+    let client = CloudClient::new(server_url);
+    let resp = client
+        .list_members(&token, &vault_id)
+        .await
+        .map_err(map_cloud_err)?;
+    Ok(resp.members)
+}
+
+#[tauri::command]
+pub async fn cloud_update_member_role(
+    state: State<'_, AppState>,
+    vault_id: String,
+    user_id: String,
+    role: String,
+) -> Result<(), String> {
+    let (server_url, token, _) = snapshot_token_and_master(&state)?;
+    let client = CloudClient::new(server_url);
+    client
+        .update_member_role(&token, &vault_id, &user_id, &role)
+        .await
+        .map_err(map_cloud_err)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatusResp, String> {
     let cloud = state
         .cloud
@@ -793,15 +831,19 @@ pub fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatusResp, Strin
             linked: true,
             server_url: Some(s.server_url.clone()),
             email: Some(s.email.clone()),
+            user_id: Some(s.user_id.clone()),
             active_vault_id: s.active_vault.as_ref().map(|v| v.id.clone()),
             active_vault_name: s.active_vault.as_ref().map(|v| v.name.clone()),
+            active_vault_role: s.active_vault.as_ref().map(|v| v.role.clone()),
         },
         None => CloudStatusResp {
             linked: false,
             server_url: None,
             email: None,
+            user_id: None,
             active_vault_id: None,
             active_vault_name: None,
+            active_vault_role: None,
         },
     })
 }

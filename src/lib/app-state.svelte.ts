@@ -36,6 +36,40 @@ class AppState {
   /** Server-side id of the active cloud vault. Used by the vault switcher
    * to highlight the current entry and skip no-op re-opens. */
   cloudVaultId = $state<string | null>(null);
+  /** Caller's role on the active vault. `null` means local-file mode (no
+   * permission gating). `reader` triggers the read-only UI lock. */
+  cloudVaultRole = $state<"owner" | "editor" | "reader" | null>(null);
+  /** Caller's own user_id on the cloud server. Lets the members dialog
+   * detect "this row is me" and hide destructive controls. */
+  cloudUserId = $state<string | null>(null);
+
+  /** True when the active vault is read-only for the caller. Local-file
+   * mode (cloudVaultRole === null) is always writable. */
+  get isReadOnly(): boolean {
+    return this.cloudVaultRole === "reader";
+  }
+
+  /** Per-vault KDBX passwords held in RAM for the lifetime of the session.
+   * Lets the vault switcher skip the password prompt for vaults the user
+   * already unlocked once this run. Cleared on disconnect / lock / restart;
+   * never persisted to disk unless the user explicitly enrolls Hello. */
+  private vaultPasswords = $state<Record<string, string>>({});
+
+  rememberVaultPassword(vaultId: string, password: string) {
+    this.vaultPasswords = { ...this.vaultPasswords, [vaultId]: password };
+  }
+  getVaultPassword(vaultId: string): string | undefined {
+    return this.vaultPasswords[vaultId];
+  }
+  knownVaultPasswords(): Record<string, string> {
+    return { ...this.vaultPasswords };
+  }
+  loadVaultPasswords(map: Record<string, string>) {
+    this.vaultPasswords = { ...map };
+  }
+  clearVaultPasswords() {
+    this.vaultPasswords = {};
+  }
 
   setPhase(p: Phase) {
     this.phase = p;
@@ -64,6 +98,12 @@ class AppState {
   }
   setCloudVaultId(id: string | null) {
     this.cloudVaultId = id;
+  }
+  setCloudVaultRole(role: "owner" | "editor" | "reader" | null) {
+    this.cloudVaultRole = role;
+  }
+  setCloudUserId(id: string | null) {
+    this.cloudUserId = id;
   }
   /** Successful save or merge: clear status, stamp the clock. */
   markSynced() {

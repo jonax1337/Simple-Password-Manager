@@ -9,12 +9,25 @@
     align?: "start" | "center" | "end";
     side?: "top" | "right" | "bottom" | "left";
     class?: string;
+    /** Lifted open state so callers can react when the menu actually opens
+     * (e.g. lazy-load list contents). Optional — when omitted, the menu
+     * manages its own open state internally. */
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
   };
 
-  let { trigger, children, align = "end", side = "bottom", class: klass }: Props = $props();
+  let {
+    trigger,
+    children,
+    align = "end",
+    side = "bottom",
+    class: klass,
+    open = $bindable(false),
+    onOpenChange,
+  }: Props = $props();
 </script>
 
-<Menu.Root>
+<Menu.Root bind:open {onOpenChange}>
   <Menu.Trigger>
     {@render trigger()}
   </Menu.Trigger>

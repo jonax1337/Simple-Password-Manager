@@ -308,6 +308,10 @@
   }
 
   async function handleSave() {
+    if (appState.isReadOnly) {
+      toast.error("Read-only", "You don't have edit permission on this vault.");
+      return;
+    }
     try {
       const changed = await checkDatabaseChanges();
       if (changed) {
@@ -341,6 +345,10 @@
   }
 
   async function handleNewEntry() {
+    if (appState.isReadOnly) {
+      toast.error("Read-only", "You don't have edit permission on this vault.");
+      return;
+    }
     // From Home the list isn't visible — bounce to All Items first so the
     // user can see the result of the create flow.
     if (isDashboardView) {

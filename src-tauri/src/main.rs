@@ -120,6 +120,8 @@ fn main() {
             commands::cloud::cloud_lookup_user,
             commands::cloud::cloud_share_vault,
             commands::cloud::cloud_unshare_vault,
+            commands::cloud::cloud_list_members,
+            commands::cloud::cloud_update_member_role,
             commands::cloud::cloud_status,
             commands::cloud::cloud_disconnect,
             commands::cloud_persistence::cloud_persist_session,

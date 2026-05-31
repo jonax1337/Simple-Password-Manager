@@ -152,6 +152,13 @@
       appState.setDbPath("");
       appState.setCloudVaultName(pendingVault.name);
       appState.setCloudVaultId(pendingVault.id);
+      // Pull fresh status to grab role + caller_user_id for permission gating.
+      try {
+        const cs = await cloudStatus();
+        appState.setCloudVaultRole(cs.active_vault_role);
+        appState.setCloudUserId(cs.user_id);
+      } catch { /* stale snapshot — gate stays as it was */ }
+      appState.rememberVaultPassword(pendingVault.id, kdbxPassword);
       const name = pendingVault.name;
       const vaultId = pendingVault.id;
       const vaultPw = kdbxPassword;
@@ -161,12 +168,17 @@
 
       // Offer Hello enrollment if the device supports it and the user
       // hasn't enrolled yet. Skipping is the safe default — explicit
-      // dialog so we never silently capture biometrics.
+      // dialog so we never silently capture biometrics. Requires a fresh
+      // cloud password (stashed during handleSignIn); rehydrated sessions
+      // route through the "Enable Hello" button in the picker instead.
       if (helloAvail && !helloEnrolled && rememberMe && pendingCloudPassword) {
         pendingHelloBundle = {
           server_url: serverUrl,
           email: username,
           cloud_password: pendingCloudPassword,
+          default_vault_id: vaultId,
+          vault_passwords: appState.knownVaultPasswords(),
+          // legacy shape for backwards compat
           vault_id: vaultId,
           vault_kdbx_password: vaultPw,
         };
@@ -183,16 +195,98 @@
   }
 
   // Hello bundle the upcoming confirmation dialog will persist if accepted.
+  // `vault_passwords` is the map version of "all vaults this session has
+  // unlocked"; populated from appState.knownVaultPasswords() at save time
+  // so a Hello unlock can decrypt every familiar vault without re-prompts.
   type HelloBundle = {
     server_url: string;
     email: string;
     cloud_password: string;
-    vault_id: string;
-    vault_kdbx_password: string;
+    default_vault_id: string;
+    vault_passwords: Record<string, string>;
+    // Legacy fields kept for backwards-compat with bundles written by the
+    // first version of this code. New writes populate both shapes; reads
+    // tolerate either.
+    vault_id?: string;
+    vault_kdbx_password?: string;
   };
   let helloOfferOpen = $state(false);
   let pendingHelloBundle = $state<HelloBundle | null>(null);
   let helloSaveBusy = $state(false);
+
+  // ----- explicit Hello enrollment (rehydrated session path) -----
+  // The post-login auto-offer needs `pendingCloudPassword`, which is only
+  // set when the user typed their cloud password into the form. Sessions
+  // that came back via Remember-Me have no fresh password, so we offer
+  // a manual "Enable Hello" dialog inside the picker that asks for it.
+  let helloEnrollDialogOpen = $state(false);
+  let helloEnrollCloudPw = $state("");
+  let helloEnrollVaultPw = $state("");
+  let helloEnrollBusy = $state(false);
+  let helloEnrollError = $state("");
+
+  function openHelloEnrollDialog() {
+    helloEnrollCloudPw = "";
+    helloEnrollVaultPw = "";
+    helloEnrollError = "";
+    helloEnrollDialogOpen = true;
+  }
+
+  async function confirmHelloEnroll() {
+    if (!helloEnrollCloudPw) {
+      helloEnrollError = "Cloud master password required.";
+      return;
+    }
+    if (!selectedVaultId) {
+      helloEnrollError = "Pick a vault first — that becomes the default.";
+      return;
+    }
+    // We need the selected vault's KDBX password too — either freshly typed
+    // here, or pulled from the session cache if the user already unlocked
+    // it once in this run.
+    const cachedPw = appState.getVaultPassword(selectedVaultId);
+    const vaultPw = helloEnrollVaultPw || cachedPw;
+    if (!vaultPw) {
+      helloEnrollError = "KDBX password for the default vault required.";
+      return;
+    }
+
+    helloEnrollBusy = true;
+    helloEnrollError = "";
+    try {
+      // Verify cloud password by attempting a (no-op) login. Wrong password
+      // would otherwise only fail on the next Hello unlock — surface it now.
+      await cloudLogin(serverUrl, username, helloEnrollCloudPw);
+      try { await cloudPersistSession(); } catch { /* best-effort */ }
+
+      // Persist any newly typed vault password into the session cache so
+      // the bundle picks it up below.
+      appState.rememberVaultPassword(selectedVaultId, vaultPw);
+
+      const bundle: HelloBundle = {
+        server_url: serverUrl,
+        email: username,
+        cloud_password: helloEnrollCloudPw,
+        default_vault_id: selectedVaultId,
+        vault_passwords: appState.knownVaultPasswords(),
+        vault_id: selectedVaultId,
+        vault_kdbx_password: vaultPw,
+      };
+      await helloCloudStore(JSON.stringify(bundle));
+      helloEnrolled = true;
+      helloEnrollDialogOpen = false;
+      helloEnrollCloudPw = "";
+      helloEnrollVaultPw = "";
+      toast.success("Hello enabled", "Next launch will unlock with one tap");
+    } catch (e) {
+      const msg = String(e);
+      if (!msg.includes("cancelled")) {
+        helloEnrollError = msg;
+      }
+    } finally {
+      helloEnrollBusy = false;
+    }
+  }
   // The cloud password from the login form is needed when persisting a
   // Hello bundle, but the login flow clears `masterPassword` for safety.
   // Stash it for the next dialog instead of holding it on the form field.
@@ -231,21 +325,49 @@
       const json = await helloCloudRetrieve();
       const bundle: HelloBundle = JSON.parse(json);
 
+      // Migrate legacy bundles that only carried a single vault.
+      const passwordMap: Record<string, string> =
+        bundle.vault_passwords && Object.keys(bundle.vault_passwords).length > 0
+          ? { ...bundle.vault_passwords }
+          : bundle.vault_id && bundle.vault_kdbx_password
+            ? { [bundle.vault_id]: bundle.vault_kdbx_password }
+            : {};
+      const defaultVaultId =
+        bundle.default_vault_id || bundle.vault_id || Object.keys(passwordMap)[0];
+      if (!defaultVaultId) {
+        throw new Error("Hello bundle has no vault");
+      }
+      const defaultPw = passwordMap[defaultVaultId];
+      if (!defaultPw) {
+        throw new Error("Hello bundle missing password for default vault");
+      }
+
       // 1. Restore the cloud session from the bundle's saved password.
       await cloudLogin(bundle.server_url, bundle.email, bundle.cloud_password);
       try { await cloudPersistSession(); } catch { /* best-effort */ }
 
-      // 2. Open the default vault straight into memory.
-      await cloudOpenVault(bundle.vault_id, bundle.vault_kdbx_password);
+      // 2. Push every vault password we know into the session cache so
+      //    subsequent switches require zero prompts.
+      appState.loadVaultPasswords(passwordMap);
+
+      // 3. Open the default vault straight into memory.
+      await cloudOpenVault(defaultVaultId, defaultPw);
 
       appState.setDbPath("");
-      appState.setCloudVaultId(bundle.vault_id);
-      // Vault name not in the bundle — pull it from the listing for the
-      // sidebar label.
+      appState.setCloudVaultId(defaultVaultId);
+      // Resolve name + role from the listing in one shot — Hello bundle
+      // only carries the password, not the role metadata.
       void cloudListVaults().then((vs) => {
-        const v = vs.find((x) => x.id === bundle.vault_id);
-        if (v) appState.setCloudVaultName(v.name);
+        const v = vs.find((x) => x.id === defaultVaultId);
+        if (v) {
+          appState.setCloudVaultName(v.name);
+          appState.setCloudVaultRole(v.role);
+        }
       });
+      try {
+        const cs = await cloudStatus();
+        appState.setCloudUserId(cs.user_id);
+      } catch { /* ignore */ }
 
       toast.success("Unlocked", "Hello signed you in");
       await onUnlock();
@@ -389,6 +511,17 @@
         {/if}
       </Button>
     </div>
+
+    {#if helloAvail && !helloEnrolled}
+      <button
+        type="button"
+        onclick={openHelloEnrollDialog}
+        class="w-full inline-flex items-center justify-center gap-2 h-9 px-4 rounded-md border border-dashed border-border bg-background hover:bg-accent/30 text-xs text-muted-foreground transition-colors"
+      >
+        <Fingerprint class="size-3.5" />
+        Enable one-tap unlock with Windows Hello
+      </button>
+    {/if}
   {/if}
 </div>
 
@@ -471,6 +604,73 @@
       {#if helloSaveBusy}
         <Loader2 class="size-4 animate-spin" />
         Saving…
+      {:else}
+        <Fingerprint class="size-4" />
+        Enable Hello
+      {/if}
+    </Button>
+  {/snippet}
+</Dialog>
+
+<!-- Manual Hello enrollment for rehydrated sessions: we don't have the
+     fresh cloud password from a form submission, so the user types it
+     here. The selected vault's KDBX password is auto-pulled from the
+     session cache when available. -->
+<Dialog
+  bind:open={helloEnrollDialogOpen}
+  title="Enable Windows Hello"
+  description="Save your cloud account + default vault behind Hello. One tap on next launch lands you in your vault."
+  size="sm"
+  onOpenChange={(o) => {
+    if (!o && !helloEnrollBusy) {
+      helloEnrollCloudPw = "";
+      helloEnrollVaultPw = "";
+      helloEnrollError = "";
+    }
+  }}
+>
+  <div class="space-y-3">
+    <div class="space-y-1.5">
+      <Label for="enroll-cloud-pw">Cloud master password</Label>
+      <Input
+        id="enroll-cloud-pw"
+        type="password"
+        bind:value={helloEnrollCloudPw}
+        placeholder="••••••••"
+        autofocus
+      />
+    </div>
+    {#if selectedVaultId && !appState.getVaultPassword(selectedVaultId)}
+      <div class="space-y-1.5">
+        <Label for="enroll-vault-pw">KeePass password for the selected vault</Label>
+        <Input
+          id="enroll-vault-pw"
+          type="password"
+          bind:value={helloEnrollVaultPw}
+          placeholder="••••••••"
+        />
+      </div>
+    {:else if selectedVaultId}
+      <p class="text-xs text-muted-foreground">
+        KDBX password for this vault is already cached from this session — Hello will reuse it.
+      </p>
+    {/if}
+    {#if helloEnrollError}
+      <p class="text-xs text-destructive break-all">{helloEnrollError}</p>
+    {/if}
+  </div>
+  {#snippet footer()}
+    <Button
+      variant="outline"
+      onclick={() => (helloEnrollDialogOpen = false)}
+      disabled={helloEnrollBusy}
+    >
+      Cancel
+    </Button>
+    <Button onclick={confirmHelloEnroll} disabled={helloEnrollBusy || !helloEnrollCloudPw}>
+      {#if helloEnrollBusy}
+        <Loader2 class="size-4 animate-spin" />
+        Enabling…
       {:else}
         <Fingerprint class="size-4" />
         Enable Hello

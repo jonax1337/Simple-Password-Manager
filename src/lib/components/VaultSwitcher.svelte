@@ -7,6 +7,7 @@
     FileLock2,
     Plus,
   } from "@lucide/svelte";
+  import { onMount } from "svelte";
   import {
     cloudListVaults,
     cloudOpenVault,
@@ -15,6 +16,18 @@
     cloudStatus,
     type CloudVaultEntry,
   } from "$lib/tauri";
+
+  /** After cloud_open succeeds, refresh role + caller_user_id from the
+   * authoritative cloud_status so the UI permission gate matches reality. */
+  async function refreshRoleAndUser() {
+    try {
+      const cs = await cloudStatus();
+      appState.setCloudVaultRole(cs.active_vault_role);
+      appState.setCloudUserId(cs.user_id);
+    } catch {
+      // Stale token / no session — leave existing gates as-is.
+    }
+  }
   import { Dialog, DropdownMenu, DropdownItem, DropdownSeparator, Button, Input, Label, toast } from "$lib/ui";
   import { appState } from "$lib/app-state.svelte";
 
@@ -33,6 +46,19 @@
   let vaults = $state<CloudVaultEntry[]>([]);
   let listLoading = $state(false);
   let listError = $state("");
+  // Lifted open state so we can lazy-load when the dropdown actually opens.
+  // Pre-loading on mount as well so the *first* click already has content
+  // — bits-ui's anchored Portal can render an empty popover for a tick
+  // otherwise and the user thinks "broken".
+  let menuOpen = $state(false);
+
+  onMount(() => {
+    void loadList();
+  });
+
+  $effect(() => {
+    if (menuOpen) void loadList();
+  });
 
   async function loadList() {
     listLoading = true;
@@ -40,12 +66,14 @@
     try {
       const status = await cloudStatus();
       if (!status.linked) {
+        listError = "Not linked to a cloud account.";
         vaults = [];
         return;
       }
       vaults = await cloudListVaults();
     } catch (e) {
       listError = String(e);
+      console.error("[VaultSwitcher] loadList failed", e);
     } finally {
       listLoading = false;
     }
@@ -67,8 +95,43 @@
       // Unsaved local edits — let user decide.
       dirtyPromptOpen = true;
     } else {
-      askKdbxPassword();
+      tryUnlockOrPrompt();
     }
+  }
+
+  /** If we already unlocked this vault this session, skip the password
+   * prompt entirely. Otherwise fall through to the modal. */
+  async function tryUnlockOrPrompt() {
+    if (!pendingSwitch) return;
+    const cached = appState.getVaultPassword(pendingSwitch.id);
+    if (cached) {
+      // Reuse the cached password — same code path as confirmKdbxUnlock
+      // but without bothering the user.
+      switching = true;
+      switchError = "";
+      try {
+        await cloudOpenVault(pendingSwitch.id, cached);
+        const name = pendingSwitch.name;
+        appState.setCloudVaultName(name);
+        appState.setCloudVaultId(pendingSwitch.id);
+        appState.setDbPath("");
+        appState.markClean();
+        await refreshRoleAndUser();
+        pendingSwitch = null;
+        toast.success("Switched", `Now viewing "${name}"`);
+        await onSwitched();
+      } catch (e) {
+        // Cached password wrong (e.g. vault re-keyed elsewhere) — wipe
+        // the stale entry and fall back to the prompt.
+        appState.rememberVaultPassword(pendingSwitch.id, "");
+        switchError = String(e);
+        askKdbxPassword();
+      } finally {
+        switching = false;
+      }
+      return;
+    }
+    askKdbxPassword();
   }
 
   function askKdbxPassword() {
@@ -89,7 +152,7 @@
       appState.markClean();
       appState.markSynced();
       dirtyPromptOpen = false;
-      askKdbxPassword();
+      await tryUnlockOrPrompt();
     } catch (e) {
       switchError = `Push failed: ${e}`;
     } finally {
@@ -100,7 +163,7 @@
   function discardAndSwitch() {
     appState.markClean(); // discard locally — the cloud copy stays as-is
     dirtyPromptOpen = false;
-    askKdbxPassword();
+    void tryUnlockOrPrompt();
   }
 
   async function confirmKdbxUnlock() {
@@ -109,11 +172,14 @@
     switchError = "";
     try {
       await cloudOpenVault(pendingSwitch.id, kdbxPassword);
+      // Cache the password so the next switch back is one click.
+      appState.rememberVaultPassword(pendingSwitch.id, kdbxPassword);
       const name = pendingSwitch.name;
       appState.setCloudVaultName(name);
       appState.setCloudVaultId(pendingSwitch.id);
       appState.setDbPath("");
       appState.markClean();
+      await refreshRoleAndUser();
       kdbxDialogOpen = false;
       pendingSwitch = null;
       kdbxPassword = "";
@@ -154,10 +220,13 @@
     createError = "";
     try {
       const resp = await cloudCreateVault(createName.trim(), createPassword);
+      appState.rememberVaultPassword(resp.id, createPassword);
       appState.setCloudVaultName(createName.trim());
       appState.setCloudVaultId(resp.id);
+      appState.setCloudVaultRole("owner");
       appState.setDbPath("");
       appState.markClean();
+      await refreshRoleAndUser();
       createDialogOpen = false;
       const created = createName.trim();
       createName = "";
@@ -172,23 +241,32 @@
   }
 </script>
 
-<DropdownMenu align="start" side="bottom" class="w-[260px]">
+<DropdownMenu bind:open={menuOpen} align="start" side="bottom" class="w-[260px]">
   {#snippet trigger()}
-    <button
-      type="button"
-      onclick={() => void loadList()}
-      class="group/vault w-full flex items-center gap-2.5 rounded-lg bg-background/70 hover:bg-background border border-border px-2.5 py-2 transition-colors text-left"
+    <!-- Render a div rather than a button: bits-ui Menu.Trigger is already
+         a <button>, and nesting buttons silently breaks click delivery. -->
+    <div
+      role="button"
+      tabindex="0"
+      class="group/vault w-full flex items-center gap-2.5 rounded-lg bg-background/70 hover:bg-background border border-border px-2.5 py-2 transition-colors text-left cursor-pointer select-none"
       title="Switch vault"
     >
       <div class="grid place-items-center size-8 rounded-md bg-primary/15 text-primary shrink-0">
         <Database class="size-4" />
       </div>
       <div class="min-w-0 flex-1">
-        <div class="text-sm font-semibold truncate leading-tight">{label}</div>
+        <div class="text-sm font-semibold truncate leading-tight flex items-center gap-1.5">
+          <span class="truncate">{label}</span>
+          {#if appState.isReadOnly}
+            <span class="text-2xs uppercase tracking-wider text-muted-foreground px-1.5 py-0.5 rounded border border-border-subtle bg-muted/40 shrink-0">
+              RO
+            </span>
+          {/if}
+        </div>
         {@render pillSnippet()}
       </div>
       <ChevronsUpDown class="size-3.5 text-muted-foreground shrink-0 opacity-60 group-hover/vault:opacity-100 transition-opacity" />
-    </button>
+    </div>
   {/snippet}
 
   <div class="px-2 py-1.5 text-2xs uppercase tracking-wider text-muted-foreground">
@@ -226,7 +304,14 @@
     <Plus />
     Create new vault…
   </DropdownItem>
-  <DropdownItem onSelect={() => void loadList()}>
+  <DropdownItem
+    onSelect={(e) => {
+      // Keep the menu open while we refresh so the user sees the spinner
+      // → updated list without clicking the trigger again.
+      e.preventDefault();
+      void loadList();
+    }}
+  >
     <Loader2 class={listLoading ? "animate-spin" : ""} />
     Refresh list
   </DropdownItem>

@@ -353,8 +353,10 @@ export interface CloudStatus {
   linked: boolean;
   server_url: string | null;
   email: string | null;
+  user_id: string | null;
   active_vault_id: string | null;
   active_vault_name: string | null;
+  active_vault_role: "owner" | "editor" | "reader" | null;
 }
 
 export interface CloudActionResp {
@@ -484,6 +486,26 @@ export async function cloudUnshareVault(
   userId: string,
 ): Promise<void> {
   return invoke("cloud_unshare_vault", { vaultId, userId });
+}
+
+export interface CloudMemberRow {
+  user_id: string;
+  email: string;
+  role: "owner" | "editor" | "reader";
+  invited_at: number;
+  accepted_at: number | null;
+}
+
+export async function cloudListMembers(vaultId: string): Promise<CloudMemberRow[]> {
+  return invoke("cloud_list_members", { vaultId });
+}
+
+export async function cloudUpdateMemberRole(
+  vaultId: string,
+  userId: string,
+  role: "editor" | "reader" | "owner",
+): Promise<void> {
+  return invoke("cloud_update_member_role", { vaultId, userId, role });
 }
 
 // Persistence

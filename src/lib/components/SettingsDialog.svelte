@@ -10,8 +10,9 @@
     Palette, Shield, Database, Settings as SettingsIcon, Info,
     Sun, Moon, Monitor, Lock, ShieldAlert, RefreshCw,
     KeyRound, Fingerprint, Rocket, Puzzle, Trash2, Heart, ExternalLink,
-    Cloud, CloudOff, ArrowUpFromLine, ArrowDownToLine,
+    Cloud, CloudOff, ArrowUpFromLine, ArrowDownToLine, Users,
   } from "@lucide/svelte";
+  import VaultMembersDialog from "./VaultMembersDialog.svelte";
   import { theme, type ThemeMode } from "$lib/theme.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { getVersion } from "@tauri-apps/api/app";
@@ -40,6 +41,7 @@
     cloudPull,
     cloudDisconnect,
     cloudShareVault,
+    cloudStatus as fetchCloudStatus,
     type BrowserInfo,
     type InstallReport,
     type YubikeyInfo,
@@ -202,33 +204,16 @@
     }
   }
 
-  // ---------- vault sharing ----------
-  let shareEmail = $state("");
-  let shareRole = $state<"editor" | "reader">("reader");
-  let shareBusy = $state(false);
-  let shareError = $state("");
-
-  async function doShareActiveVault() {
-    if (!cloudState.active_vault_id) {
-      shareError = "No active vault — open one from the cloud picker first.";
-      return;
-    }
-    shareBusy = true;
-    shareError = "";
-    try {
-      await cloudShareVault(cloudState.active_vault_id, shareEmail.trim(), shareRole);
-      toast.success("Shared", `${shareEmail} can now ${shareRole === "editor" ? "edit" : "view"} ${cloudState.active_vault_name}`);
-      shareEmail = "";
-    } catch (e) {
-      shareError = String(e);
-    } finally {
-      shareBusy = false;
-    }
+  // ---------- vault membership ----------
+  let membersDialogOpen = $state(false);
+  function openMembersDialog() {
+    membersDialogOpen = true;
   }
 
   async function doCloudDisconnect() {
     try {
       await cloudDisconnect();
+      appState.clearVaultPasswords();
       await refreshCloudStatus();
       toast.success("Disconnected");
     } catch (e) {
@@ -522,32 +507,14 @@
 
                 {#if cloudState.active_vault_id}
                   <SettingsRow
-                    title="Share active vault"
-                    description="Invite another account by username. They need to have signed up on the same server already."
+                    icon={Users}
+                    title="Manage access"
+                    description="Invite people to this vault, change roles, or revoke access."
                   >
-                    <div class="space-y-2">
-                      <div class="flex gap-2">
-                        <Input
-                          placeholder="alice@example.com"
-                          bind:value={shareEmail}
-                          class="flex-1"
-                        />
-                        <select bind:value={shareRole} class="h-9 px-2 rounded-md border bg-background text-sm">
-                          <option value="reader">Reader</option>
-                          <option value="editor">Editor</option>
-                        </select>
-                      </div>
-                      <Button
-                        size="sm"
-                        onclick={doShareActiveVault}
-                        disabled={shareBusy || !shareEmail.trim()}
-                      >
-                        {shareBusy ? "Sharing…" : "Share"}
-                      </Button>
-                      {#if shareError}
-                        <p class="text-xs text-destructive break-all">{shareError}</p>
-                      {/if}
-                    </div>
+                    <Button size="sm" onclick={openMembersDialog}>
+                      <Users class="size-3.5" />
+                      Manage members…
+                    </Button>
                   </SettingsRow>
                 {/if}
               {:else}
@@ -729,6 +696,15 @@
     </Button>
   {/snippet}
 </Dialog>
+
+<!-- Vault members dialog -->
+<VaultMembersDialog
+  bind:open={membersDialogOpen}
+  vaultId={cloudState.active_vault_id}
+  vaultName={cloudState.active_vault_name ?? ""}
+  callerRole={appState.cloudVaultRole}
+  callerUserId={appState.cloudUserId}
+/>
 
 <!-- Hello enroll dialog -->
 <Dialog

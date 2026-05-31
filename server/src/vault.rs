@@ -22,6 +22,57 @@ use crate::error::{ApiError, ApiResult};
 use crate::storage::{VaultMembership, VaultRole};
 
 #[derive(Debug, Serialize)]
+pub struct MemberRow {
+    pub user_id: String,
+    pub email: String,
+    pub role: VaultRole,
+    pub invited_at: i64,
+    pub accepted_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListMembersResp {
+    pub members: Vec<MemberRow>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateMemberRoleReq {
+    pub role: VaultRole,
+}
+
+pub async fn list_members(
+    State(state): State<AuthState>,
+    Extension(user): Extension<AuthenticatedUserId>,
+    Path(vault_id): Path<String>,
+) -> ApiResult<Json<ListMembersResp>> {
+    let rows = state.storage.list_vault_members(&user.0, &vault_id)?;
+    Ok(Json(ListMembersResp {
+        members: rows
+            .into_iter()
+            .map(|m| MemberRow {
+                user_id: m.user_id,
+                email: m.email,
+                role: m.role,
+                invited_at: m.invited_at,
+                accepted_at: m.accepted_at,
+            })
+            .collect(),
+    }))
+}
+
+pub async fn update_member_role(
+    State(state): State<AuthState>,
+    Extension(user): Extension<AuthenticatedUserId>,
+    Path((vault_id, target_user_id)): Path<(String, String)>,
+    Json(req): Json<UpdateMemberRoleReq>,
+) -> ApiResult<()> {
+    state
+        .storage
+        .update_member_role(&user.0, &vault_id, &target_user_id, req.role)?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
 pub struct VaultSummary {
     pub id: String,
     pub name: String,

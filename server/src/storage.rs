@@ -112,6 +112,17 @@ pub struct VaultListEntry {
     pub wrapped_vault_key_b64: String,
 }
 
+/// Row returned by `list_vault_members`: enough for the dashboard /
+/// settings UI to render member rows with email + role.
+#[derive(Debug, Clone)]
+pub struct MemberInfo {
+    pub user_id: String,
+    pub email: String,
+    pub role: VaultRole,
+    pub invited_at: i64,
+    pub accepted_at: Option<i64>,
+}
+
 impl Storage {
     pub fn open(path: &Path) -> ApiResult<Self> {
         let conn = Connection::open(path)
@@ -593,6 +604,108 @@ impl Storage {
         if n == 0 {
             return Err(ApiError::Internal("share insert produced 0 rows".into()));
         }
+        Ok(())
+    }
+
+    /// List every member of a vault with their role + email. Caller must
+    /// be a member; non-members get NotFound (we don't leak vault
+    /// existence by returning Unauthorized).
+    pub fn list_vault_members(
+        &self,
+        caller_user_id: &str,
+        vault_id: &str,
+    ) -> ApiResult<Vec<MemberInfo>> {
+        let conn = self.inner.lock().unwrap();
+        // Membership gate.
+        let caller_member: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, caller_user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if caller_member.is_none() {
+            return Err(ApiError::NotFound);
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT m.user_id, u.email, m.role, m.invited_at, m.accepted_at
+             FROM vault_members m
+             INNER JOIN users u ON u.id = m.user_id
+             WHERE m.vault_id = ?1
+             ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END,
+                      m.invited_at",
+        )?;
+        let rows = stmt
+            .query_map(params![vault_id], |row| {
+                let role_str: String = row.get(2)?;
+                Ok(MemberInfo {
+                    user_id: row.get(0)?,
+                    email: row.get(1)?,
+                    role: VaultRole::parse(&role_str).unwrap_or(VaultRole::Reader),
+                    invited_at: row.get(3)?,
+                    accepted_at: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Change a member's role. Owner-only. Refuses to demote the last
+    /// owner (would orphan the vault) and to operate on non-members.
+    pub fn update_member_role(
+        &self,
+        caller_user_id: &str,
+        vault_id: &str,
+        target_user_id: &str,
+        new_role: VaultRole,
+    ) -> ApiResult<()> {
+        let conn = self.inner.lock().unwrap();
+        let caller_role: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, caller_user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let caller_role = caller_role
+            .as_deref()
+            .and_then(VaultRole::parse)
+            .ok_or(ApiError::NotFound)?;
+        if !caller_role.can_admin() {
+            return Err(ApiError::Unauthorized);
+        }
+
+        let target_role: Option<String> = conn
+            .query_row(
+                "SELECT role FROM vault_members WHERE vault_id = ?1 AND user_id = ?2",
+                params![vault_id, target_user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let target_role = target_role
+            .as_deref()
+            .and_then(VaultRole::parse)
+            .ok_or(ApiError::NotFound)?;
+
+        // Demoting the last owner orphans the vault — refuse.
+        if matches!(target_role, VaultRole::Owner) && !matches!(new_role, VaultRole::Owner) {
+            let owner_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM vault_members WHERE vault_id = ?1 AND role = 'owner'",
+                params![vault_id],
+                |row| row.get(0),
+            )?;
+            if owner_count <= 1 {
+                return Err(ApiError::BadRequest(
+                    "can't demote the last owner; transfer ownership first".into(),
+                ));
+            }
+        }
+
+        conn.execute(
+            "UPDATE vault_members SET role = ?1 WHERE vault_id = ?2 AND user_id = ?3",
+            params![new_role.as_str(), vault_id, target_user_id],
+        )?;
         Ok(())
     }
 

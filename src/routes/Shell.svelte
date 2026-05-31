@@ -94,6 +94,9 @@
     appState.setPhase("checking");
     appState.setCloudVaultName(null);
     appState.setCloudVaultId(null);
+    appState.setCloudVaultRole(null);
+    appState.setCloudUserId(null);
+    appState.clearVaultPasswords();
     if (manual) {
       clearLastDatabasePath();
       lastDatabasePath = null;

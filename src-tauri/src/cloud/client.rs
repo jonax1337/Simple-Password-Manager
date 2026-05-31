@@ -404,6 +404,40 @@ impl CloudClient {
         self.parse_unit(res).await
     }
 
+    pub async fn list_members(
+        &self,
+        token: &str,
+        vault_id: &str,
+    ) -> Result<ListMembersResp, CloudError> {
+        let res = self
+            .http
+            .get(format!("{}/vaults/{}/members", self.base_url, vault_id))
+            .bearer_auth(token)
+            .send()
+            .await?;
+        self.parse_json(res).await
+    }
+
+    pub async fn update_member_role(
+        &self,
+        token: &str,
+        vault_id: &str,
+        user_id: &str,
+        role: &str,
+    ) -> Result<(), CloudError> {
+        let res = self
+            .http
+            .patch(format!(
+                "{}/vaults/{}/members/{}",
+                self.base_url, vault_id, user_id
+            ))
+            .bearer_auth(token)
+            .json(&UpdateRoleReq { role })
+            .send()
+            .await?;
+        self.parse_unit(res).await
+    }
+
     async fn parse_json<T: for<'de> Deserialize<'de>>(
         &self,
         res: reqwest::Response,
@@ -442,6 +476,25 @@ impl CloudClient {
 pub struct UserLookupResp {
     pub user_id: String,
     pub account_pubkey_b64: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MemberRow {
+    pub user_id: String,
+    pub email: String,
+    pub role: String,
+    pub invited_at: i64,
+    pub accepted_at: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListMembersResp {
+    pub members: Vec<MemberRow>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateRoleReq<'a> {
+    role: &'a str,
 }
 
 #[derive(Debug, Serialize)]

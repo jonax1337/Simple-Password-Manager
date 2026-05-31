@@ -140,6 +140,11 @@
           <div class="text-sm font-semibold truncate leading-tight">{dbDisplayName}</div>
           {@render pill()}
         </div>
+        {#if appState.isReadOnly}
+          <span class="text-2xs uppercase tracking-wider text-muted-foreground px-1.5 py-0.5 rounded border border-border-subtle bg-muted/40">
+            RO
+          </span>
+        {/if}
       </div>
     {/if}
   </div>

@@ -27,6 +27,9 @@ pub struct ActiveVault {
     pub id: String,
     pub name: String,
     pub vault_key: SecretKey,
+    /// Caller's role on this vault (owner/editor/reader). Drives the
+    /// frontend's read-only UI lock.
+    pub role: String,
     /// Last etag we observed on the server. Sent as `expected_etag` on the
     /// next PUT to detect concurrent writes from another device.
     pub last_known_etag: Option<String>,
