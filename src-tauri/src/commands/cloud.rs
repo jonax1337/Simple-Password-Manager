@@ -25,6 +25,7 @@ use simple_password_manager::cloud::{
     session::ActiveVault,
     CloudSession,
 };
+use simple_password_manager::kdbx::Database;
 use simple_password_manager::state::AppState;
 use std::fs;
 use tauri::State;
@@ -84,12 +85,11 @@ fn current_db_path(state: &AppState) -> Result<std::path::PathBuf, String> {
         .database
         .lock()
         .map_err(|_| "database state poisoned".to_string())?;
-    let path = lock
-        .as_ref()
+    lock.as_ref()
         .ok_or_else(|| "No database loaded".to_string())?
         .path
-        .clone();
-    Ok(path)
+        .clone()
+        .ok_or_else(|| "Cloud-only vault: no local file".to_string())
 }
 
 fn store_session(state: &AppState, session: CloudSession) -> Result<(), String> {
@@ -152,8 +152,6 @@ pub async fn cloud_signup(
     master_password: String,
     initial_vault_name: Option<String>,
 ) -> Result<CloudSignupResp, String> {
-    let db_path = current_db_path(&state)?;
-
     // 1. Generate the canonical secrets.
     let master_key = generate_master_key();
     let salt = new_kdf_salt();
@@ -178,9 +176,26 @@ pub async fn cloud_signup(
     let vault_key = generate_master_key(); // same primitive — 32 random bytes
     let wrapped_vault_key = wrap_key(&master_key, &vault_key).map_err(map_crypto_err)?;
 
-    // 4. Seal the on-disk kdbx with vault_key for upload.
-    let kdbx_bytes = fs::read(&db_path)
-        .map_err(|e| format!("Failed to read kdbx for upload: {}", e))?;
+    // 4. Source the kdbx bytes from in-memory state (cloud-only) or
+    //    fall back to the file (legacy local mode).
+    let kdbx_bytes = {
+        let db_lock = state
+            .database
+            .lock()
+            .map_err(|_| "database state poisoned".to_string())?;
+        let db = db_lock
+            .as_ref()
+            .ok_or_else(|| "No database loaded".to_string())?;
+        if db.is_cloud_only() {
+            db.save_to_bytes().map_err(|e| e.to_string())?
+        } else {
+            let path = db
+                .path
+                .as_ref()
+                .ok_or_else(|| "No DB path".to_string())?;
+            fs::read(path).map_err(|e| format!("Failed to read kdbx: {}", e))?
+        }
+    };
     let sealed_vault = seal_vault(&vault_key, &kdbx_bytes).map_err(map_crypto_err)?;
 
     // 5. Auth proof from master_key (NOT password — server can verify
@@ -373,13 +388,18 @@ pub async fn cloud_list_vaults(
 }
 
 /// Download a vault, decrypt with master_key → vault_key → kdbx bytes,
-/// write to `target_path`. Sets active_vault so subsequent push/pull
-/// flows through this vault.
+/// open the KDBX in memory (cloud-only mode — no file on disk), and
+/// store it as the active database. Subsequent push/pull operate on
+/// the in-memory bytes.
+///
+/// `kdbx_password` is the KeePass-layer master password — separate from
+/// the cloud master_password. The cloud crypto only undoes the outer
+/// AES-GCM wrap; the KDBX layer underneath still needs its own key.
 #[tauri::command]
 pub async fn cloud_open_vault(
     state: State<'_, AppState>,
     vault_id: String,
-    target_path: String,
+    kdbx_password: String,
 ) -> Result<(), String> {
     let (server_url, token, master_bytes) = snapshot_token_and_master(&state)?;
 
@@ -419,14 +439,23 @@ pub async fn cloud_open_vault(
     };
 
     let sealed = b64_decode(&full.ciphertext_b64).map_err(map_crypto_err)?;
-    let plaintext = open_vault(&vault_key, &sealed).map_err(map_crypto_err)?;
+    let kdbx_bytes = open_vault(&vault_key, &sealed).map_err(map_crypto_err)?;
 
-    if let Some(parent) = std::path::Path::new(&target_path).parent() {
-        let _ = fs::create_dir_all(parent);
+    // Open the kdbx straight from RAM — no fs::write. The vault never
+    // touches disk on this machine.
+    let db = Database::open_from_bytes(&kdbx_bytes, kdbx_password, None)
+        .map_err(|e| e.to_string())?;
+
+    // Atomic swap of in-memory DB + active_vault. Locks acquired in this
+    // tight order: database first, then cloud. Any previous open DB is
+    // replaced.
+    {
+        let mut db_lock = state
+            .database
+            .lock()
+            .map_err(|_| "database state poisoned".to_string())?;
+        *db_lock = Some(db);
     }
-    fs::write(&target_path, &plaintext)
-        .map_err(|e| format!("Failed to write vault to {}: {}", target_path, e))?;
-
     let mut cloud = state
         .cloud
         .lock()
@@ -444,11 +473,31 @@ pub async fn cloud_open_vault(
 
 /// Upload the in-app database to the active vault. CAS on expected_etag —
 /// surface 409s so the UI can pull first and merge.
+///
+/// For cloud-only vaults we re-serialize the in-memory KDBX to bytes via
+/// `save_to_bytes` — no fs::read, no file ever exists on disk for these.
+/// Legacy local-file vaults still read from disk for backward-compat with
+/// users who linked their existing local kdbx to the cloud.
 #[tauri::command]
 pub async fn cloud_push(state: State<'_, AppState>) -> Result<(), String> {
-    let db_path = current_db_path(&state)?;
-    let kdbx_bytes = fs::read(&db_path)
-        .map_err(|e| format!("Failed to read kdbx for push: {}", e))?;
+    let kdbx_bytes = {
+        let db_lock = state
+            .database
+            .lock()
+            .map_err(|_| "database state poisoned".to_string())?;
+        let db = db_lock
+            .as_ref()
+            .ok_or_else(|| "No database loaded".to_string())?;
+        if db.is_cloud_only() {
+            db.save_to_bytes().map_err(|e| e.to_string())?
+        } else {
+            let path = db
+                .path
+                .as_ref()
+                .ok_or_else(|| "No DB path for legacy push".to_string())?;
+            fs::read(path).map_err(|e| format!("Failed to read kdbx for push: {}", e))?
+        }
+    };
 
     let (server_url, token, vault_id, vault_key_bytes, expected_etag) =
         snapshot_active_vault(&state)?;
@@ -474,7 +523,6 @@ pub async fn cloud_push(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn cloud_pull(state: State<'_, AppState>) -> Result<(), String> {
-    let db_path = current_db_path(&state)?;
     let (server_url, token, vault_id, vault_key_bytes, _) = snapshot_active_vault(&state)?;
     let vault_key = SecretKey::from_bytes(vault_key_bytes);
 
@@ -485,9 +533,49 @@ pub async fn cloud_pull(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(map_cloud_err)?;
 
     let sealed = b64_decode(&full.ciphertext_b64).map_err(map_crypto_err)?;
-    let plaintext = open_vault(&vault_key, &sealed).map_err(map_crypto_err)?;
-    fs::write(&db_path, &plaintext)
-        .map_err(|e| format!("Failed to write pulled kdbx: {}", e))?;
+    let kdbx_bytes = open_vault(&vault_key, &sealed).map_err(map_crypto_err)?;
+
+    // For cloud-only vaults: rebuild the in-memory DB from the freshly
+    // pulled bytes, preserving the KDBX-layer password. For legacy
+    // local-file vaults: write to disk and let the file watcher trigger
+    // a reload via the existing merge path.
+    let is_cloud_only = {
+        let db_lock = state
+            .database
+            .lock()
+            .map_err(|_| "database state poisoned".to_string())?;
+        db_lock
+            .as_ref()
+            .map(|d| d.is_cloud_only())
+            .unwrap_or(false)
+    };
+
+    if is_cloud_only {
+        // Re-open via Database::open_from_bytes. We need the kdbx
+        // password from the existing Database instance.
+        use secrecy::ExposeSecret;
+        let (pw_str, yubikey) = {
+            let db_lock = state
+                .database
+                .lock()
+                .map_err(|_| "database state poisoned".to_string())?;
+            let db = db_lock
+                .as_ref()
+                .ok_or_else(|| "No database loaded".to_string())?;
+            (db.password.expose_secret().to_string(), db.yubikey.clone())
+        };
+        let fresh = Database::open_from_bytes(&kdbx_bytes, pw_str, yubikey)
+            .map_err(|e| e.to_string())?;
+        let mut db_lock = state
+            .database
+            .lock()
+            .map_err(|_| "database state poisoned".to_string())?;
+        *db_lock = Some(fresh);
+    } else {
+        let db_path = current_db_path(&state)?;
+        fs::write(&db_path, &kdbx_bytes)
+            .map_err(|e| format!("Failed to write pulled kdbx: {}", e))?;
+    }
 
     if let Ok(mut cloud) = state.cloud.lock() {
         if let Some(s) = cloud.as_mut() {
@@ -499,17 +587,27 @@ pub async fn cloud_pull(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Create a new vault from the currently-open local DB. Mints a fresh
-/// vault_key, wraps with master_key, seals + uploads kdbx. The new vault
-/// becomes active.
+/// Create a brand-new empty vault on the server. The KDBX is minted in
+/// memory with the user's chosen vault password — no local file ever
+/// exists for the new vault. After upload the new vault becomes active.
 #[tauri::command]
 pub async fn cloud_create_vault(
     state: State<'_, AppState>,
     name: String,
+    kdbx_password: String,
 ) -> Result<CloudCreateVaultResp, String> {
-    let db_path = current_db_path(&state)?;
-    let kdbx_bytes = fs::read(&db_path)
-        .map_err(|e| format!("Failed to read kdbx: {}", e))?;
+    let trimmed = name.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("Vault name required".into());
+    }
+    if kdbx_password.is_empty() {
+        return Err("KDBX password required".into());
+    }
+
+    // Mint a fresh empty KDBX in RAM, seal it for the cloud.
+    let new_db = Database::create_in_memory(&trimmed, kdbx_password.clone())
+        .map_err(|e| e.to_string())?;
+    let kdbx_bytes = new_db.save_to_bytes().map_err(|e| e.to_string())?;
 
     let (server_url, token, master_bytes) = snapshot_token_and_master(&state)?;
     let master_key = SecretKey::from_bytes(master_bytes);
@@ -522,18 +620,27 @@ pub async fn cloud_create_vault(
     let resp = client
         .create_vault(
             &token,
-            name.trim(),
+            &trimmed,
             &b64_encode(&sealed),
             &b64_encode(&wrapped_vk),
         )
         .await
         .map_err(map_cloud_err)?;
 
+    // Make the new vault the active one — swap the in-memory DB so the
+    // app's group/entry views land in the new (empty) vault immediately.
+    {
+        let mut db_lock = state
+            .database
+            .lock()
+            .map_err(|_| "database state poisoned".to_string())?;
+        *db_lock = Some(new_db);
+    }
     if let Ok(mut cloud) = state.cloud.lock() {
         if let Some(s) = cloud.as_mut() {
             s.active_vault = Some(ActiveVault {
                 id: resp.id.clone(),
-                name: name.trim().to_string(),
+                name: trimmed,
                 vault_key,
                 last_known_etag: Some(resp.etag),
             });

@@ -23,9 +23,11 @@ pub async fn status(State(state): State<BridgeState>) -> Json<StatusResponse> {
             Some(db) => (
                 true,
                 db.path
-                    .file_stem()
+                    .as_ref()
+                    .and_then(|p| p.file_stem())
                     .and_then(|s| s.to_str())
-                    .map(|s| s.to_string()),
+                    .map(|s| s.to_string())
+                    .or_else(|| db.db.meta.database_name.clone()),
             ),
             None => (false, None),
         },

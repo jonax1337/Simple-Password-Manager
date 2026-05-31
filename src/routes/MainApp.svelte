@@ -23,6 +23,8 @@
     analyzeConflicts,
     resolveConflicts,
     parseLockHeldError,
+    cloudStatus,
+    cloudPush,
     type GroupData,
     type EntryData,
     type EntryConflict,
@@ -134,7 +136,9 @@
 
   $effect(() => {
     void appState.refreshCounter;
-    if (appState.dbPath) {
+    // Cloud-only vaults have no dbPath but still need their groups reloaded
+    // after a switch or push/pull — gate on cloudVaultId OR dbPath.
+    if (appState.dbPath || appState.cloudVaultId) {
       getGroups().then((g) => (rootGroup = g)).catch(() => undefined);
       if (isFavoritesView) {
         getFavoriteEntries().then((e) => (favoriteEntries = e)).catch(() => undefined);
@@ -228,6 +232,14 @@
       }
       appState.setSyncStatus("saving");
       await saveDatabase();
+      // If linked + active vault, the cloud push is the real persistence
+      // step (cloud-only vaults have no local file to write). Awaiting it
+      // here means `markClean` only fires once everything actually landed.
+      const cs = await cloudStatus();
+      if (cs.linked && cs.active_vault_id) {
+        appState.setSyncStatus("cloud-sync");
+        await cloudPush();
+      }
       appState.markClean();
       appState.markSynced();
     } catch (e) {
@@ -548,6 +560,13 @@
         initialExpandedGroups={initialExpanded}
         onOpenSettings={() => (settingsOpen = true)}
         onLogout={handleLogout}
+        onVaultSwitched={async () => {
+          // The Rust state.database has already been swapped to the new
+          // vault's in-memory KDBX; we just reload the UI off it.
+          await load();
+          selectedEntryUuid = "";
+          appState.refresh();
+        }}
       />
     {/snippet}
 

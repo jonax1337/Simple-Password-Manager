@@ -4,6 +4,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getLastDatabasePath, clearLastDatabasePath } from "$lib/storage";
   import { appState } from "$lib/app-state.svelte";
+  import { cloudRehydrateSession } from "$lib/tauri";
   import UnlockScreen from "./UnlockScreen.svelte";
   import QuickUnlockScreen from "./QuickUnlockScreen.svelte";
   import MainApp from "./MainApp.svelte";
@@ -12,6 +13,10 @@
 
   let lastDatabasePath = $state<string | null>(null);
   let filePathFromAssociation = $state<string | null>(null);
+
+  /** If a Remember-Me cloud session rehydrated at startup, this is the
+   * last-opened vault id the picker should highlight + auto-target. */
+  let rehydratedVaultId = $state<string | null>(null);
 
   onMount(() => {
     void init();
@@ -34,6 +39,22 @@
   });
 
   async function init() {
+    // First, see if a Remember-Me cloud session is on disk. If so, the
+    // Rust side rehydrates the in-memory CloudSession (master_key + token)
+    // automatically; we just remember which vault to highlight and route
+    // straight to the unlock screen so the cloud tab can take over.
+    try {
+      const rehydrated = await cloudRehydrateSession();
+      if (rehydrated.linked) {
+        rehydratedVaultId = rehydrated.last_vault_id;
+        appState.setPhase("unlock");
+        return;
+      }
+    } catch {
+      // Persistence backend unavailable (non-Windows) or corrupt entry.
+      // Fall through to the local-file flow.
+    }
+
     try {
       const initialFilePath = await invoke<string | null>("get_initial_file_path");
       if (initialFilePath) {
@@ -60,11 +81,19 @@
       // ignore
     }
     const win = getCurrentWindow();
-    await win.setTitle(`Simple Password Manager — ${path.split(/[\\/]/).pop()}`);
+    // Cloud-only vaults have no path — fall back to the vault name the
+    // CloudUnlockTab stashed in appState.
+    const label =
+      path && path.length > 0
+        ? path.split(/[\\/]/).pop()
+        : appState.cloudVaultName ?? "Vault";
+    await win.setTitle(`Simple Password Manager — ${label}`);
   }
 
   function handleMainClose(manual = false) {
     appState.setPhase("checking");
+    appState.setCloudVaultName(null);
+    appState.setCloudVaultId(null);
     if (manual) {
       clearLastDatabasePath();
       lastDatabasePath = null;
@@ -82,6 +111,7 @@
   {:else if appState.phase === "unlock"}
     <UnlockScreen
       initialFilePath={filePathFromAssociation}
+      {rehydratedVaultId}
       onUnlock={async () => {
         const p = filePathFromAssociation ?? getLastDatabasePath() ?? "";
         await handleUnlocked(p);

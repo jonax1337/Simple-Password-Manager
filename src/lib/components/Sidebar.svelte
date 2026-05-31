@@ -8,6 +8,7 @@
   import { IconButton, Eyebrow, Tooltip } from "$lib/ui";
   import { navRow } from "$lib/ui/recipes";
   import { onMount } from "svelte";
+  import VaultSwitcher from "./VaultSwitcher.svelte";
 
   type Props = {
     rootGroup: GroupData | null;
@@ -18,6 +19,9 @@
     initialExpandedGroups?: Set<string>;
     onOpenSettings: () => void;
     onLogout: () => void | Promise<void>;
+    /** Called by the vault switcher after we swap to a different cloud
+     * vault — the parent reloads groups + entries against the new in-memory DB. */
+    onVaultSwitched?: () => void | Promise<void>;
   };
 
   let {
@@ -29,9 +33,16 @@
     initialExpandedGroups,
     onOpenSettings,
     onLogout,
+    onVaultSwitched,
   }: Props = $props();
 
-  const dbFileName = $derived(appState.dbPath ? appState.dbPath.split(/[\\/]/).pop() ?? "Vault" : "Vault");
+  // Cloud-only vaults expose their name via appState.cloudVaultName instead
+  // of a file path. Prefer that so the sidebar shows "Personal" rather than
+  // "Vault" when the user opened from the cloud.
+  const dbFileName = $derived(
+    appState.cloudVaultName ??
+      (appState.dbPath ? appState.dbPath.split(/[\\/]/).pop() ?? "Vault" : "Vault"),
+  );
   const dbDisplayName = $derived(dbFileName.replace(/\.kdbx$/i, ""));
 
   // Cheap ticker so the relative "X seconds ago" label refreshes without
@@ -100,26 +111,37 @@
 </script>
 
 <aside class="flex flex-col h-full bg-sidebar min-h-0 border-r border-border-subtle">
-  <!-- Vault header -->
+  {#snippet pill()}
+    <div class="text-2xs text-muted-foreground flex items-center gap-1.5" title={syncPill.title}>
+      <span class="inline-block size-1.5 rounded-full {syncPill.dotClass}"></span>
+      <span class="truncate">{syncPill.label}</span>
+    </div>
+  {/snippet}
+
+  <!-- Vault header. Cloud-only vaults get a dropdown switcher; local file
+       vaults stay as a static label since switching between two local
+       .kdbx files goes through the open-file dialog instead. -->
   <div class="px-3 pt-3 pb-3 shrink-0">
-    <div
-      class="flex items-center gap-2.5 rounded-lg bg-background/70 border border-border px-2.5 py-2"
-      title={appState.dbPath}
-    >
-      <div class="grid place-items-center size-8 rounded-md bg-primary/15 text-primary shrink-0">
-        <Database class="size-4" />
-      </div>
-      <div class="min-w-0 flex-1">
-        <div class="text-sm font-semibold truncate leading-tight">{dbDisplayName}</div>
-        <div
-          class="text-2xs text-muted-foreground flex items-center gap-1.5"
-          title={syncPill.title}
-        >
-          <span class="inline-block size-1.5 rounded-full {syncPill.dotClass}"></span>
-          <span class="truncate">{syncPill.label}</span>
+    {#if appState.cloudVaultId}
+      <VaultSwitcher
+        label={dbDisplayName}
+        pillSnippet={pill}
+        onSwitched={() => onVaultSwitched?.()}
+      />
+    {:else}
+      <div
+        class="flex items-center gap-2.5 rounded-lg bg-background/70 border border-border px-2.5 py-2"
+        title={appState.dbPath}
+      >
+        <div class="grid place-items-center size-8 rounded-md bg-primary/15 text-primary shrink-0">
+          <Database class="size-4" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-semibold truncate leading-tight">{dbDisplayName}</div>
+          {@render pill()}
         </div>
       </div>
-    </div>
+    {/if}
   </div>
 
   <!-- Primary nav -->

@@ -128,6 +128,22 @@ export async function helloClear(dbPath: string): Promise<void> {
   return invoke("hello_clear", { dbPath });
 }
 
+// Cloud-side Hello bundle. Opaque JSON the frontend serializes (cloud
+// password + default vault id + that vault's KDBX password) so a single
+// Hello prompt drops the user straight into their default vault.
+export async function helloCloudIsEnrolled(): Promise<boolean> {
+  return invoke("hello_cloud_is_enrolled");
+}
+export async function helloCloudStore(bundleJson: string): Promise<void> {
+  return invoke("hello_cloud_store", { bundleJson });
+}
+export async function helloCloudRetrieve(): Promise<string> {
+  return invoke("hello_cloud_retrieve");
+}
+export async function helloCloudClear(): Promise<void> {
+  return invoke("hello_cloud_clear");
+}
+
 export async function saveDatabase(): Promise<void> {
   return invoke("save_database");
 }
@@ -405,15 +421,28 @@ export async function cloudListVaults(): Promise<CloudVaultEntry[]> {
   return invoke("cloud_list_vaults");
 }
 
+/**
+ * Open a cloud vault directly into the in-memory database — no file ever
+ * lands on disk. `kdbxPassword` is the KeePass-layer master password
+ * (separate from the cloud account password).
+ */
 export async function cloudOpenVault(
   vaultId: string,
-  targetPath: string,
+  kdbxPassword: string,
 ): Promise<void> {
-  return invoke("cloud_open_vault", { vaultId, targetPath });
+  return invoke("cloud_open_vault", { vaultId, kdbxPassword });
 }
 
-export async function cloudCreateVault(name: string): Promise<{ id: string }> {
-  return invoke("cloud_create_vault", { name });
+/**
+ * Mint a brand-new empty vault on the server. KDBX is generated in memory
+ * with the supplied `kdbxPassword`; no local file ever exists. After
+ * success the new vault becomes active and the in-memory DB swaps to it.
+ */
+export async function cloudCreateVault(
+  name: string,
+  kdbxPassword: string,
+): Promise<{ id: string }> {
+  return invoke("cloud_create_vault", { name, kdbxPassword });
 }
 
 export async function cloudRenameVault(vaultId: string, name: string): Promise<void> {
@@ -461,7 +490,14 @@ export async function cloudUnshareVault(
 export async function cloudPersistSession(): Promise<boolean> {
   return invoke("cloud_persist_session");
 }
-export async function cloudRehydrateSession(): Promise<boolean> {
+export interface CloudRehydrateResp {
+  linked: boolean;
+  server_url: string | null;
+  email: string | null;
+  last_vault_id: string | null;
+}
+
+export async function cloudRehydrateSession(): Promise<CloudRehydrateResp> {
   return invoke("cloud_rehydrate_session");
 }
 export async function cloudForgetSession(): Promise<void> {

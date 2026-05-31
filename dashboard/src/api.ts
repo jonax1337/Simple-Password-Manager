@@ -48,7 +48,13 @@ function b64Encode(bytes: Uint8Array): string {
 }
 
 async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
-  const out = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
+  // Cast through a fresh Uint8Array view backed by a regular ArrayBuffer.
+  // TS 5.6 tightened BufferSource: a Uint8Array typed as ArrayBufferLike
+  // is no longer assignable. Allocating a new buffer + copying bytes
+  // guarantees the typed-array's `buffer` is a plain ArrayBuffer.
+  const buf = new ArrayBuffer(bytes.length);
+  new Uint8Array(buf).set(bytes);
+  const out = await crypto.subtle.digest("SHA-256", buf);
   return new Uint8Array(out);
 }
 
@@ -68,22 +74,25 @@ export async function deriveAuthHash(
     outputType: "binary",
   });
   const wrapped = b64Decode(wrappedMasterKeyB64);
-  // AES-GCM unwrap: nonce(12) || ciphertext+tag(rest)
-  const nonce = wrapped.slice(0, 12);
-  const ciphertext = wrapped.slice(12);
+  // AES-GCM unwrap: nonce(12) || ciphertext+tag(rest). Copy into fresh
+  // ArrayBuffers so SubtleCrypto's BufferSource accepts them under
+  // strict TS 5.6 typings.
+  const nonceBuf = new ArrayBuffer(12);
+  new Uint8Array(nonceBuf).set(wrapped.subarray(0, 12));
+  const ctBuf = new ArrayBuffer(wrapped.length - 12);
+  new Uint8Array(ctBuf).set(wrapped.subarray(12));
+
+  const keyBuf = new ArrayBuffer(passwordKey.length);
+  new Uint8Array(keyBuf).set(passwordKey);
   const key = await crypto.subtle.importKey(
     "raw",
-    passwordKey as Uint8Array,
+    keyBuf,
     { name: "AES-GCM" },
     false,
     ["decrypt"],
   );
   const masterKey = new Uint8Array(
-    await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: nonce as BufferSource },
-      key,
-      ciphertext as BufferSource,
-    ),
+    await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonceBuf }, key, ctBuf),
   );
   const authInput = new Uint8Array(masterKey.length + 4);
   authInput.set(masterKey);

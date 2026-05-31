@@ -178,10 +178,19 @@ pub fn save_database(state: State<AppState>) -> Result<(), String> {
         })?;
 
     if let Some(db) = database_lock.as_mut() {
+        if db.is_cloud_only() {
+            // Cloud vault: returning Ok here is a no-op signal to the
+            // frontend's autosave path. The actual upload happens via
+            // cloud_push, triggered immediately after by the same flow.
+            return Ok(());
+        }
+        let Some(path) = db.path.clone() else {
+            return Ok(());
+        };
         // Acquire a lock around the actual write. Foreign locks fail fast
         // with a peer hint so the frontend can show "Alice is editing".
         // Stale foreign locks (crashed peer) are stolen transparently.
-        match lockfile::acquire_lock(&db.path) {
+        match lockfile::acquire_lock(&path) {
             Ok(_) => {}
             Err(LockError::HeldByPeer(host, pid)) => {
                 return Err(format!("LOCK_HELD:{}:{}", host, pid));
@@ -189,7 +198,7 @@ pub fn save_database(state: State<AppState>) -> Result<(), String> {
             Err(e) => return Err(e.to_string()),
         }
         let result = db.save().map_err(|e| e.to_string());
-        let _ = lockfile::release_lock(&db.path);
+        let _ = lockfile::release_lock(&path);
         result
     } else {
         Err("No database loaded".to_string())
@@ -204,7 +213,10 @@ pub fn peek_lock_status(state: State<AppState>) -> Result<Option<LockInfo>, Stri
             "Failed to access database state".to_string()
         })?;
     if let Some(db) = database_lock.as_ref() {
-        Ok(lockfile::peek_foreign_lock(&db.path))
+        match db.path.as_ref() {
+            Some(p) => Ok(lockfile::peek_foreign_lock(p)),
+            None => Ok(None),
+        }
     } else {
         Err("No database loaded".to_string())
     }
@@ -218,7 +230,9 @@ pub fn close_database(state: State<AppState>) -> Result<(), String> {
             "Failed to access database state".to_string()
         })?;
     if let Some(db) = database_lock.as_ref() {
-        let _ = simple_password_manager::lockfile::release_lock(&db.path);
+        if let Some(path) = db.path.as_ref() {
+            let _ = simple_password_manager::lockfile::release_lock(path);
+        }
     }
     *database_lock = None;
     drop(database_lock);

@@ -29,6 +29,14 @@ class AppState {
   // ms-epoch of the last successful sync (save or merge). Null until first save.
   lastSyncedAt = $state<number | null>(null);
 
+  /** Name of the active cloud vault when running in cloud-only mode (no
+   * local file). Drives the sidebar label and the window title. Null when
+   * we're working with a local kdbx file (dbPath is the source then). */
+  cloudVaultName = $state<string | null>(null);
+  /** Server-side id of the active cloud vault. Used by the vault switcher
+   * to highlight the current entry and skip no-op re-opens. */
+  cloudVaultId = $state<string | null>(null);
+
   setPhase(p: Phase) {
     this.phase = p;
   }
@@ -50,6 +58,12 @@ class AppState {
   }
   setSyncStatus(s: SyncStatus) {
     this.syncStatus = s;
+  }
+  setCloudVaultName(name: string | null) {
+    this.cloudVaultName = name;
+  }
+  setCloudVaultId(id: string | null) {
+    this.cloudVaultId = id;
   }
   /** Successful save or merge: clear status, stamp the clock. */
   markSynced() {

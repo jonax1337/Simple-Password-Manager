@@ -1,96 +1,150 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+/* Mirror the desktop app's design tokens so the dashboard looks and feels
+ * like a slice of the same product. Source of truth lives in
+ * ../src/app.css — keep these blocks in sync when the palette evolves. */
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
-  color-scheme: light dark;
-  color: rgb(15 23 42);
-  background: rgb(248 250 252);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.18 0.012 282);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.012 282);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.012 282);
+  --sidebar: oklch(0.972 0.008 282);
+  --primary: oklch(0.56 0.20 282);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.965 0.008 282);
+  --secondary-foreground: oklch(0.18 0.012 282);
+  --muted: oklch(0.96 0.006 282);
+  --muted-foreground: oklch(0.50 0.014 282);
+  --accent: oklch(0.945 0.022 282);
+  --accent-foreground: oklch(0.34 0.18 282);
+  --destructive: oklch(0.58 0.235 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.6 0.18 145);
+  --warning: oklch(0.75 0.16 75);
+  --border: oklch(0.91 0.008 282);
+  --border-subtle: oklch(0.94 0.006 282);
+  --input: oklch(0.91 0.008 282);
+  --ring: oklch(0.56 0.20 282);
+  --radius: 0.625rem;
 }
+
 @media (prefers-color-scheme: dark) {
   :root {
-    color: rgb(241 245 249);
-    background: rgb(15 23 42);
+    --background: oklch(0.185 0.008 282);
+    --foreground: oklch(0.965 0.005 282);
+    --card: oklch(0.225 0.008 282);
+    --card-foreground: oklch(0.965 0.005 282);
+    --popover: oklch(0.225 0.008 282);
+    --popover-foreground: oklch(0.965 0.005 282);
+    --sidebar: oklch(0.158 0.008 282);
+    --primary: oklch(0.70 0.16 282);
+    --primary-foreground: oklch(0.16 0.012 282);
+    --secondary: oklch(0.265 0.008 282);
+    --secondary-foreground: oklch(0.965 0.005 282);
+    --muted: oklch(0.27 0.008 282);
+    --muted-foreground: oklch(0.70 0.012 282);
+    --accent: oklch(0.32 0.06 282);
+    --accent-foreground: oklch(0.86 0.13 282);
+    --destructive: oklch(0.70 0.19 22);
+    --success: oklch(0.72 0.17 145);
+    --warning: oklch(0.80 0.15 75);
+    --border: oklch(1 0 0 / 9%);
+    --border-subtle: oklch(1 0 0 / 5%);
+    --input: oklch(1 0 0 / 12%);
+    --ring: oklch(0.70 0.16 282);
   }
-  .card { background: rgb(30 41 59); }
-  .input, .button-outline { background: rgb(30 41 59); color: inherit; }
-  .vault-row:hover { background: rgb(30 41 59); }
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
 
-body { min-height: 100vh; }
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
-#app {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.4;
+  --text-xs: 12px;
+  --text-xs--line-height: 1.45;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.45;
+  --text-base: 14px;
+  --text-base--line-height: 1.5;
+  --text-lg: 17px;
+  --text-lg--line-height: 1.35;
+  --text-xl: 20px;
+  --text-xl--line-height: 1.3;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
 }
 
-.header { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0 1.5rem; }
-.header h1 { font-size: 1.25rem; font-weight: 600; flex: 1; }
-.header .meta { font-size: 0.75rem; color: rgb(100 116 139); }
-
-.card {
-  background: white;
-  border-radius: 0.75rem;
-  padding: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  margin-bottom: 1rem;
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body,
+  #app {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background-color: var(--color-primary);
+    color: var(--color-primary-foreground);
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--color-muted-foreground) 30%, transparent);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--color-muted-foreground) 55%, transparent);
+    background-clip: padding-box;
+  }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  input, select, textarea { font: inherit; color: inherit; }
 }
-
-.field { margin-bottom: 1rem; }
-.field label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.375rem; }
-.input {
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid rgb(203 213 225);
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-  background: white;
-  color: inherit;
-}
-.input:focus { outline: 2px solid rgb(99 102 241); outline-offset: -1px; border-color: transparent; }
-
-.button, .button-outline {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  border: 1px solid transparent;
-  background: rgb(99 102 241);
-  color: white;
-}
-.button:hover { background: rgb(79 70 229); }
-.button:disabled { opacity: 0.5; cursor: not-allowed; }
-.button-outline {
-  background: transparent;
-  border-color: rgb(203 213 225);
-  color: inherit;
-}
-.button-outline:hover { background: rgb(241 245 249); }
-.button-row { display: flex; gap: 0.5rem; }
-.button-row .grow { flex: 1; }
-
-.error {
-  color: rgb(220 38 38);
-  font-size: 0.875rem;
-  margin-top: 0.75rem;
-}
-
-.vault-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
-  border-bottom: 1px solid rgb(226 232 240);
-  cursor: default;
-}
-.vault-row:last-child { border-bottom: none; }
-.vault-row .name { flex: 1; font-weight: 500; font-size: 0.875rem; }
-.vault-row .role { font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.05em; color: rgb(100 116 139); padding: 0.125rem 0.5rem; background: rgb(241 245 249); border-radius: 999px; }
-.vault-row .updated { font-size: 0.75rem; color: rgb(100 116 139); }
-
-.empty { padding: 2rem; text-align: center; color: rgb(100 116 139); font-size: 0.875rem; }

@@ -15,13 +15,25 @@ use super::types::{ConflictChoice, EntryConflict, KdfInfo, YubikeyConfig, Yubike
 
 pub struct Database {
     pub db: KeepassDatabase,
-    pub path: PathBuf,
+    /// Local file path the vault is persisted to. `None` for cloud-only
+    /// vaults that live entirely in RAM — those bypass save()/check_for_changes()
+    /// and rely on the cloud layer for durability.
+    pub path: Option<PathBuf>,
     pub password: SecretString,
     /// If set, the database is encrypted with master password + a Yubikey
     /// HMAC-SHA1 challenge-response. We remember which key + slot the user
     /// chose so we can perform the same challenge on every save.
     pub yubikey: Option<YubikeyConfig>,
     pub last_modified: Option<SystemTime>,
+}
+
+impl Database {
+    /// Local vaults have a file path on disk. Cloud-only vaults don't:
+    /// they're loaded from bytes (via cloud_open_vault) and saved by
+    /// re-serializing to bytes + pushing to the server.
+    pub fn is_cloud_only(&self) -> bool {
+        self.path.is_none()
+    }
 }
 
 /// List Yubikeys currently connected. Exposed via a Tauri command so the
@@ -107,7 +119,7 @@ impl Database {
 
         let mut new_db = Self {
             db,
-            path: path.clone(),
+            path: Some(path.clone()),
             password: secret_password,
             yubikey,
             last_modified: None,
@@ -123,6 +135,25 @@ impl Database {
 
     pub fn open(path: PathBuf, password: String) -> Result<Self, DatabaseError> {
         Self::open_with_yubikey(path, password, None)
+    }
+
+    /// Create a fresh, empty database in memory. Used by `cloud_create_vault`
+    /// to mint a new cloud-only vault without ever touching disk. Caller
+    /// is expected to `save_to_bytes` + seal + upload immediately.
+    pub fn create_in_memory(name: &str, password: String) -> Result<Self, DatabaseError> {
+        let secret_password = SecretString::new(password.into_boxed_str());
+        let mut config = DatabaseConfig::default();
+        config.kdf_config = default_kdf_config();
+        let mut db = KeepassDatabase::with_config(config);
+        db.meta.database_name = Some(name.to_string());
+        db.root_mut().name = name.to_string();
+        Ok(Self {
+            db,
+            path: None,
+            password: secret_password,
+            yubikey: None,
+            last_modified: None,
+        })
     }
 
     pub fn open_with_yubikey(
@@ -155,24 +186,87 @@ impl Database {
 
         Ok(Self {
             db,
-            path,
+            path: Some(path),
             password: secret_password,
             yubikey,
             last_modified,
         })
     }
 
+    /// Open a vault directly from in-memory KDBX bytes. Used for cloud
+    /// vaults — the bytes arrive from the server already decrypted by
+    /// the AES-GCM cloud layer, and we hand them straight to the
+    /// keepass parser without ever touching the filesystem.
+    pub fn open_from_bytes(
+        bytes: &[u8],
+        password: String,
+        yubikey: Option<YubikeyConfig>,
+    ) -> Result<Self, DatabaseError> {
+        let secret_password = SecretString::new(password.into_boxed_str());
+        let key = build_key(&secret_password, yubikey.as_ref())?;
+
+        let mut cursor = std::io::Cursor::new(bytes);
+        let db = KeepassDatabase::open(&mut cursor, key).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("Incorrect key") || msg.contains("Invalid credentials") {
+                DatabaseError::InvalidCredentials
+            } else {
+                DatabaseError::OpenError(msg)
+            }
+        })?;
+
+        Ok(Self {
+            db,
+            path: None,
+            password: secret_password,
+            yubikey,
+            last_modified: None,
+        })
+    }
+
+    /// Re-serialize the vault to KDBX bytes. The cloud command path takes
+    /// these, AES-GCM-seals them, and PUTs them at the server. Never
+    /// touches disk.
+    pub fn save_to_bytes(&self) -> Result<Vec<u8>, DatabaseError> {
+        let key = build_key(&self.password, self.yubikey.as_ref())?;
+        let mut buf: Vec<u8> = Vec::new();
+        // We need an owned-bytes clone of self.db because `KeepassDatabase::save`
+        // takes self by value in some versions; here it borrows mutably,
+        // but a fresh writer cursor backs the bytes.
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        // SAFETY: the keepass crate's save mutates internal state during
+        // serialization (re-derives the random IVs etc.). We hold &self
+        // here but need &mut to call save. The cleanest way is to clone
+        // the inner db, save into the clone, drop it. The Database struct
+        // owns its keepass::Database by value, so we can't easily borrow
+        // mut from &self — clone it.
+        let tmp = self.db.clone();
+        // keepass::Database::save takes &mut self in current API; we work
+        // on the temporary clone so the bytes-getter remains &self.
+        #[allow(unused_mut)]
+        let mut tmp = tmp;
+        tmp.save(&mut cursor, key)
+            .map_err(|e| DatabaseError::SaveError(e.to_string()))?;
+        Ok(buf)
+    }
+
     pub fn save(&mut self) -> Result<(), DatabaseError> {
+        let Some(path) = self.path.clone() else {
+            return Err(DatabaseError::SaveError(
+                "cloud-only vault has no file path — use save_to_bytes + cloud_push instead"
+                    .to_string(),
+            ));
+        };
         let key = build_key(&self.password, self.yubikey.as_ref())?;
 
-        let mut file = File::create(&self.path)
+        let mut file = File::create(&path)
             .map_err(|e| DatabaseError::SaveError(format!("Failed to create file: {}", e)))?;
 
         self.db
             .save(&mut file, key)
             .map_err(|e| DatabaseError::SaveError(e.to_string()))?;
 
-        self.last_modified = std::fs::metadata(&self.path)
+        self.last_modified = std::fs::metadata(&path)
             .ok()
             .and_then(|m| m.modified().ok());
 
@@ -204,7 +298,12 @@ impl Database {
     }
 
     pub fn check_for_changes(&self) -> Result<bool, DatabaseError> {
-        let current_modified = std::fs::metadata(&self.path)
+        let Some(path) = self.path.as_ref() else {
+            // Cloud-only vaults don't have a local file to mtime-check.
+            // The cloud sync layer handles concurrency via ETags.
+            return Ok(false);
+        };
+        let current_modified = std::fs::metadata(path)
             .ok()
             .and_then(|m| m.modified().ok());
 
@@ -215,7 +314,12 @@ impl Database {
     }
 
     pub fn merge_database(&mut self) -> Result<(), DatabaseError> {
-        let mut file = File::open(&self.path)
+        let Some(path) = self.path.clone() else {
+            // Cloud-only: nothing to merge from a local file. The cloud
+            // pull path replaces in-memory state directly.
+            return Ok(());
+        };
+        let mut file = File::open(&path)
             .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;
 
         // Merge requires reading the on-disk version, which means a fresh
@@ -230,7 +334,7 @@ impl Database {
         let root_id = self.db.root().id();
         Self::merge_into(&mut self.db, &disk_db, root_id, root_id);
 
-        self.last_modified = std::fs::metadata(&self.path)
+        self.last_modified = std::fs::metadata(&path)
             .ok()
             .and_then(|m| m.modified().ok());
 
@@ -327,7 +431,12 @@ impl Database {
     /// enabled. Callers should gate this behind `check_for_changes()` so
     /// they don't burn a touch when nothing has changed.
     pub fn analyze_conflicts(&self) -> Result<Vec<EntryConflict>, DatabaseError> {
-        let mut file = File::open(&self.path)
+        let Some(path) = self.path.as_ref() else {
+            // Cloud-only vaults have no local file to diff against; the
+            // cloud server is the single source of truth.
+            return Ok(Vec::new());
+        };
+        let mut file = File::open(path)
             .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;
         let key = build_key(&self.password, self.yubikey.as_ref())?;
         let disk_db = KeepassDatabase::open(&mut file, key)
@@ -379,7 +488,10 @@ impl Database {
         &mut self,
         decisions: HashMap<String, ConflictChoice>,
     ) -> Result<(), DatabaseError> {
-        let mut file = File::open(&self.path)
+        let Some(path) = self.path.clone() else {
+            return Ok(());
+        };
+        let mut file = File::open(&path)
             .map_err(|e| DatabaseError::OpenError(format!("Failed to open file: {}", e)))?;
         let key = build_key(&self.password, self.yubikey.as_ref())?;
         let disk_db = KeepassDatabase::open(&mut file, key)
@@ -420,7 +532,7 @@ impl Database {
         let root_id = self.db.root().id();
         Self::merge_into(&mut self.db, &disk_db, root_id, root_id);
 
-        self.last_modified = std::fs::metadata(&self.path)
+        self.last_modified = std::fs::metadata(&path)
             .ok()
             .and_then(|m| m.modified().ok());
         Ok(())
@@ -522,7 +634,7 @@ mod tests {
     #[test]
     fn create_writes_file_to_disk() {
         let (dir, db) = fresh_db();
-        assert!(db.path.exists());
+        assert!(db.path.as_ref().unwrap().exists());
         assert!(db.last_modified.is_some());
         drop(dir);
     }
@@ -589,8 +701,9 @@ mod tests {
         // Sleep past the filesystem mtime resolution (Linux ext4 = 1s).
         std::thread::sleep(std::time::Duration::from_millis(1100));
         // Rewrite the file's bytes from "outside" the Database struct.
-        let bytes = std::fs::read(&db.path).unwrap();
-        std::fs::write(&db.path, bytes).unwrap();
+        let path = db.path.as_ref().unwrap();
+        let bytes = std::fs::read(path).unwrap();
+        std::fs::write(path, bytes).unwrap();
         assert!(db.check_for_changes().unwrap());
     }
 

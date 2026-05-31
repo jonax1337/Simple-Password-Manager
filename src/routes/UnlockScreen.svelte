@@ -14,10 +14,23 @@
 
   type Props = {
     initialFilePath?: string | null;
+    rehydratedVaultId?: string | null;
     onUnlock: () => void | Promise<void>;
   };
 
-  let { initialFilePath = null, onUnlock }: Props = $props();
+  let {
+    initialFilePath = null,
+    rehydratedVaultId = null,
+    onUnlock,
+  }: Props = $props();
+
+  // Cloud-Remember-Me path: a session was rehydrated on startup. Land the
+  // user on the cloud tab so they don't need to click around.
+  $effect(() => {
+    if (rehydratedVaultId !== null) {
+      activeTab = "cloud";
+    }
+  });
 
   let password = $state("");
   // svelte-ignore state_referenced_locally
@@ -201,7 +214,7 @@
       </div>
 
       {#if activeTab === "cloud"}
-        <CloudUnlockTab {onUnlock} />
+        <CloudUnlockTab {onUnlock} {rehydratedVaultId} />
       {:else}
       <div class="space-y-4">
         <div class="space-y-1.5">

@@ -26,6 +26,13 @@ use sha1::{Digest, Sha1};
 #[cfg_attr(not(windows), allow(dead_code))]
 const TARGET_PREFIX: &str = "digital.laux.simple_password_manager:hello:";
 
+/// Cloud-side Hello bundle slot. Single, well-known target — assumes one
+/// cloud account per Windows user (matches the cloud_persistence model).
+/// The bundle is opaque JSON: server URL, email, cloud-pw, default vault
+/// id + kdbx-pw. Frontend serializes; Rust just stores and retrieves.
+#[cfg_attr(not(windows), allow(dead_code))]
+const CLOUD_TARGET: &str = "digital.laux.simple_password_manager:hello:cloud-default";
+
 #[cfg_attr(not(windows), allow(dead_code))]
 fn target_for(db_path: &str) -> String {
     let mut hasher = Sha1::new();
@@ -196,6 +203,10 @@ mod imp {
     /// button without burning a biometric scan on every render.
     pub fn is_enrolled(db_path: &str) -> Result<bool, String> {
         let target = target_for(db_path);
+        cred_exists(&target)
+    }
+
+    fn cred_exists(target: &str) -> Result<bool, String> {
         let target_w: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
         unsafe {
             let mut cred_ptr: *mut CREDENTIALW = std::ptr::null_mut();
@@ -213,6 +224,87 @@ mod imp {
                 Err(e) => Err(format!("CredReadW probe failed: {}", e)),
             }
         }
+    }
+
+    // ----- Cloud bundle: same CredManager mechanics, fixed target. -----
+
+    pub fn store_cloud(json: &str) -> Result<(), String> {
+        use super::CLOUD_TARGET;
+        let target_w: Vec<u16> =
+            CLOUD_TARGET.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut secret_bytes: Vec<u8> = json.as_bytes().to_vec();
+        let cred = CREDENTIALW {
+            Flags: CRED_FLAGS(0),
+            Type: CRED_TYPE_GENERIC,
+            TargetName: windows::core::PWSTR(target_w.as_ptr() as *mut _),
+            Comment: windows::core::PWSTR::null(),
+            LastWritten: windows::Win32::Foundation::FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            },
+            CredentialBlobSize: secret_bytes.len() as u32,
+            CredentialBlob: secret_bytes.as_mut_ptr(),
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            AttributeCount: 0,
+            Attributes: std::ptr::null_mut(),
+            TargetAlias: windows::core::PWSTR::null(),
+            UserName: windows::core::PWSTR::null(),
+        };
+        unsafe {
+            CredWriteW(&cred, 0).map_err(|e| format!("CredWriteW failed: {}", e))?;
+        }
+        Ok(())
+    }
+
+    pub fn read_cloud() -> Result<String, String> {
+        use super::CLOUD_TARGET;
+        let target_w: Vec<u16> =
+            CLOUD_TARGET.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let mut cred_ptr: *mut CREDENTIALW = std::ptr::null_mut();
+            CredReadW(
+                windows::core::PCWSTR(target_w.as_ptr()),
+                CRED_TYPE_GENERIC,
+                None,
+                &mut cred_ptr,
+            )
+            .map_err(|e| {
+                if e.code() == ERROR_NOT_FOUND.to_hresult() {
+                    "no stored cloud bundle".to_string()
+                } else {
+                    format!("CredReadW failed: {}", e)
+                }
+            })?;
+            let cred = &*cred_ptr;
+            let len = cred.CredentialBlobSize as usize;
+            let blob = std::slice::from_raw_parts(cred.CredentialBlob, len);
+            let s = String::from_utf8(blob.to_vec())
+                .map_err(|_| "stored cloud bundle is not valid UTF-8".to_string());
+            CredFree(cred_ptr as *mut _);
+            s
+        }
+    }
+
+    pub fn clear_cloud() -> Result<(), String> {
+        use super::CLOUD_TARGET;
+        let target_w: Vec<u16> =
+            CLOUD_TARGET.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            match CredDeleteW(
+                windows::core::PCWSTR(target_w.as_ptr()),
+                CRED_TYPE_GENERIC,
+                None,
+            ) {
+                Ok(()) => Ok(()),
+                Err(e) if e.code() == ERROR_NOT_FOUND.to_hresult() => Ok(()),
+                Err(e) => Err(format!("CredDeleteW failed: {}", e)),
+            }
+        }
+    }
+
+    pub fn cloud_is_enrolled() -> Result<bool, String> {
+        use super::CLOUD_TARGET;
+        cred_exists(CLOUD_TARGET)
     }
 }
 
@@ -241,6 +333,18 @@ mod imp {
         Ok(())
     }
     pub fn is_enrolled(_db_path: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    pub fn store_cloud(_json: &str) -> Result<(), String> {
+        Err("Windows Hello is only available on Windows".to_string())
+    }
+    pub fn read_cloud() -> Result<String, String> {
+        Err("Windows Hello is only available on Windows".to_string())
+    }
+    pub fn clear_cloud() -> Result<(), String> {
+        Ok(())
+    }
+    pub fn cloud_is_enrolled() -> Result<bool, String> {
         Ok(false)
     }
 }
@@ -338,6 +442,64 @@ pub fn hello_clear(db_path: String) -> Result<(), String> {
         return Ok(());
     }
     imp::clear(&db_path)
+}
+
+// ----- Cloud-side Hello bundle (opaque JSON) -----
+
+/// Is there a cloud-Hello bundle currently saved? Probed by the unlock
+/// screen to decide whether to render the prominent "Sign in with Hello"
+/// button alongside the password form.
+#[tauri::command]
+pub fn hello_cloud_is_enrolled() -> Result<bool, String> {
+    imp::cloud_is_enrolled()
+}
+
+/// Save a cloud-Hello bundle. The frontend serializes whatever payload
+/// makes the unlock smooth on next launch (typically: cloud password +
+/// the default vault id + that vault's KDBX password). Storing is gated
+/// by a live Hello prompt so the user is physically present.
+#[tauri::command]
+#[allow(unused_variables)]
+pub async fn hello_cloud_store(
+    app: tauri::AppHandle,
+    bundle_json: String,
+) -> Result<(), String> {
+    if bundle_json.is_empty() {
+        return Err("bundle is empty".into());
+    }
+    #[cfg(windows)]
+    {
+        let hwnd_raw = main_window_hwnd_raw(&app)?;
+        imp::verify(hwnd_raw, "Confirm to save your cloud account for Hello unlock").await?;
+        imp::store_cloud(&bundle_json)
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Windows Hello is only available on Windows".to_string())
+    }
+}
+
+/// Reveal the cloud-Hello bundle after a successful Hello prompt. Returns
+/// the same JSON the caller stored — frontend parses it and drives the
+/// auto-login + auto-vault-open flow.
+#[tauri::command]
+#[allow(unused_variables)]
+pub async fn hello_cloud_retrieve(app: tauri::AppHandle) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let hwnd_raw = main_window_hwnd_raw(&app)?;
+        imp::verify(hwnd_raw, "Unlock your cloud vault").await?;
+        imp::read_cloud()
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Windows Hello is only available on Windows".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn hello_cloud_clear() -> Result<(), String> {
+    imp::clear_cloud()
 }
 
 #[cfg(test)]
