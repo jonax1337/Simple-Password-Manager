@@ -1,197 +1,223 @@
-# Roadmap — Richtung 1Password
+# Roadmap — From KeePass client to full password suite
 
-Stand: 2026-05-30. Ziel: Von "lokaler KeePass-Client" zu vollwertiger Password-Suite (Desktop + Browser + Sync). Phasen sind so geordnet, dass jede für sich abgeschlossen ist und keine spätere Phase blockiert.
+Stand: 2026-05-31. Ziel war "von lokalem KeePass-Client zu vollwertiger Password-Suite (Desktop + Browser + Sync)" — der Großteil davon ist jetzt drin. Nächste Session: **Phase 6 (UI polish + Fixes)**, danach Folge-Stages für Production-Hardening.
 
 ## Status
 
-- **Phase 1 (Quick Wins): ✅ ausgeliefert** — Close-to-Tray, Autostart, Update-Workflow, signed Bundles.
-- **v2.0 (Mai 2026): ✅ ausgeliefert** — kompletter Frontend-Rewrite von Next.js/React → **Svelte 5 + Vite**.
-- **Phase 2 (Performance): ✅ Profiling abgeschlossen.**
-- **Phase 3 (Browser Extension): ✅ ausgeliefert** — KeePassXC-kompatibler Native-Messaging-Host, Bridge-HTTP-Server, Auto-Fill/Save-Prompt MVP.
-- **Phase 4 (Cloud-Ordner-Sync): ✅ ausgeliefert (2026-05-30)** — siehe unten, Implementation in `src-tauri/src/lockfile.rs`, `src-tauri/src/commands/database.rs` (notify-watcher), `src/lib/components/ConflictResolutionDialog.svelte`.
-- **Phase 5 (Eigener Sync-Server): ⚠️ MVP-Skelett (2026-05-30)** — `server/` crate (Axum + SQLite + JWT), E2E-Crypto in `src-tauri/src/cloud/`, Cloud-Tab in Settings. Bewusst NICHT produktionsreif: keine Recovery-Codes, keine Rate-Limits, kein automatisches Onboarding für neue Geräte. Siehe `server/README.md` für Threat-Model + Self-Hosting.
-- **Dateipfade in den älteren Phasen-Notizen unten** (`components/Settings.tsx`, `lib/storage.ts` etc.) sind aus der React-Ära — die Funktionen leben jetzt unter `src/lib/` und `src/lib/components/`.
+- **Phase 1 (Quick Wins)** ✅ — Close-to-Tray, Autostart, Update-Workflow, signed Bundles.
+- **v2.0 (Mai 2026)** ✅ — kompletter Frontend-Rewrite von Next.js/React → **Svelte 5 + Vite**.
+- **Phase 2 (Performance)** ✅ — Profiling abgeschlossen.
+- **Phase 3 (Browser Extension)** ✅ — KeePassXC-kompatibler Native-Messaging-Host, Bridge-HTTP-Server, Auto-Fill/Save-Prompt MVP.
+- **Phase 4 (Cloud-Ordner-Sync)** ✅ — `notify`-File-Watcher, `<db>.kdbx.lock` mit Stale-Detection, Sync-Status-Pill in der Sidebar, Per-Eintrag-Konflikt-Dialog.
+- **Phase 5 (Eigener Sync-Server)** ✅ — alle Stages A–E + Cloud-only-Mode + Hello-Integration. Siehe unten und [`server/README.md`](./server/README.md).
+- **Phase 6 (UI polish + Fixes)** ⏭️ in Arbeit — siehe Punkte unten.
+
+Die alten Phase-1-Notizen unten haben Dateipfade aus der React-Ära (`components/Settings.tsx`, `lib/storage.ts` etc.). Die Funktionen leben jetzt unter `src/lib/` und `src/lib/components/`.
 
 ---
 
-## Phase 1 — Quick Wins (geschätzt 1-2 Tage)
+## Phase 4 — Cloud-Ordner-Sync (✅ shipped)
 
-Drei kleinere, sichtbare Features. Geringes Risiko, kein Architektur-Eingriff.
+Datei-basierter Sync ohne eigenen Server (KeePassXC-Modell). Wenn das KDBX in Dropbox / OneDrive / Nextcloud liegt:
 
-### 1.1 Close-to-Tray als Default
-- **Status heute**: `closeToTray` Setting existiert in `components/Settings.tsx:29`, Default `false`. Tray-Icon ist in `src-tauri/src/main.rs:62-94` schon gebaut.
-- **Änderung**:
-  - Default in `Settings.tsx` auf `true` ändern (neue User bekommen Tray-Verhalten).
-  - **Wichtig**: Bestehende User dürfen nicht überrascht werden. Lösung: neuer Storage-Key `closeToTray_v2` mit Default `true`; alter Key bleibt für Migration einmalig respektiert.
-  - Close-Handler im Main-Window-Listener (irgendwo in `components/main-app/`) muss auf das Setting reagieren und `window.hide()` statt `window.close()` aufrufen.
-- **Aufwand**: ~30 min.
+- `src-tauri/src/commands/database.rs` — `notify`-Crate watcht den Parent-Ordner, debounced 250 ms. Emittiert `database-external-change` an das Frontend, das `checkDatabaseChanges` + ggf. `merge_database` ruft.
+- `src-tauri/src/lockfile.rs` — KeePass-Style `<db>.kdbx.lock` mit `{pid, host, acquired_at}` JSON. 10-Minuten-Stale-Detection klaut fremde Locks von gecrashten Peers. Save-Pfad acquired / released um jedes Write.
+- `src/lib/components/Sidebar.svelte` — Sync-Pill: `Saving…` / `Merging…` / `Syncing cloud…` / `Synced 5s ago` / `Sync needs attention`.
+- `src/lib/components/ConflictResolutionDialog.svelte` — Per-Eintrag-Diff (lokal vs. remote), Keep-local / Keep-remote pro Eintrag, "Keep all local/remote"-Shortcuts.
 
-### 1.2 Autostart bei Installation
-- **Mechanismus**: `tauri-plugin-autostart` (offizielles Plugin).
-- **Schritte**:
-  1. `tauri-plugin-autostart = "2.0"` in `src-tauri/Cargo.toml`.
-  2. `@tauri-apps/plugin-autostart` in `package.json`.
-  3. Plugin in `main.rs` registrieren mit `MacosLauncher::LaunchAgent` + Args wie `--minimized`.
-  4. Neuer Tauri-Command `enable_autostart` / `disable_autostart` / `is_autostart_enabled`.
-  5. UI in Settings: Toggle "Bei Windows-Start automatisch starten".
-  6. **Bei Installation aktivieren**: In `src-tauri/tauri.conf.json` bundle.windows.nsis.installerHooks (existiert schon, Datei fehlt aber unter `nsis/`) — Hook anlegen, der nach Install den Autostart-Eintrag in der Registry (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) setzt. Alternativ: erster App-Start ruft `enable_autostart()` einmal auf, gesteuert über localStorage-Flag `firstLaunchHandled`.
-- **App-Verhalten beim Autostart**: Direkt minimiert in Tray starten (kein Hauptfenster sichtbar), DB bleibt natürlich gelockt.
-- **Risiken**: Antivirus-Tools markieren Autostart-Einträge gelegentlich. Lösung: Signiertes Binary (siehe Phase 1.3).
-
-### 1.3 GitHub-basierter Update-Checker
-- **Mechanismus**: `tauri-plugin-updater` (offiziell), Endpoint zeigt auf eine `latest.json` in GitHub Releases.
-- **Vorarbeit**: Signing-Key generieren (`npm run tauri signer generate`). **Private Key** lokal sicher aufbewahren (Password-Manager? :) ). Public Key in `tauri.conf.json`.
-- **Release-Pipeline** (`.github/workflows/release.yml` — neu):
-  1. Trigger auf Git-Tag `v*`.
-  2. Build auf `windows-latest` (matrix später erweiterbar auf macOS/Linux).
-  3. Signiert mit Private Key (aus GH Secret `TAURI_SIGNING_PRIVATE_KEY`).
-  4. Erzeugt Installer + `latest.json` mit Signatur.
-  5. Upload als Release-Asset.
-- **App-Seite**:
-  1. Plugin registrieren, Endpoint = `https://github.com/jonax1337/<repo>/releases/latest/download/latest.json`.
-  2. Beim App-Start: silent check, Toast "Update verfügbar". Setting "Updates automatisch installieren" (Default: nur benachrichtigen).
-  3. UI-Komponente in Settings: "Auf Updates prüfen" Button + "Installieren & neustarten".
-- **Risiken**:
-  - Code-Signing-Zertifikat für Windows (nicht das Update-Signing — das ist ein anderes Konzept) ist kostenpflichtig. Ohne wird SmartScreen bei jeder Version warnen. Optional, aber für seriöse Wahrnehmung wichtig.
-  - GitHub Repo muss `public` sein, sonst Token nötig.
-- **Aufwand**: ~4-6 Stunden (mit erstmaligem CI-Setup).
+Tests: 126 ✅ (inkl. lockfile-Suite mit acquire/release/stale/peek).
 
 ---
 
-## Phase 2 — Performance (gezielt, datengetrieben)
+## Phase 5 — Eigener Sync-Server (✅ shipped, MVP)
 
-Bei 100-500 Einträgen sind die typischen Engpässe oft nicht da, wo man denkt. Erst messen, dann fixen.
+End-to-end-verschlüsselter Sync mit eigenem Server. Server ist self-hostable, Multi-Vault, mit Sharing, Permission-Levels und Web-Dashboard.
 
-### 2.1 Profiling
-- React DevTools Profiler im Dev-Build: Welche Komponenten rendern bei welchen Aktionen?
-- Tauri-Kommando-Timing: in `lib/tauri.ts` einen dünnen Wrapper, der `console.time`/`timeEnd` um jeden invoke legt (nur Dev).
-- Konkrete Szenarien zum Messen:
-  - Kalter App-Start bis Login-Screen (Ziel: < 500 ms).
-  - DB-Öffnen mit ~300 Einträgen (Ziel: < 1.5 s, dominiert von Argon2 — kaum optimierbar ohne KDF-Parameter zu schwächen).
-  - Wechsel zwischen Gruppen (Ziel: < 50 ms).
-  - Tippen in der Suche (Ziel: < 16 ms pro Keystroke).
-  - Entry-Detail öffnen (Ziel: < 100 ms).
+### Stage A — Server Multi-Vault Schema & Endpoints
 
-### 2.2 Wahrscheinliche Optimierungen
-- **Entry-List**: Bei 100-500 reicht React-Virtuell wahrscheinlich noch nicht — aber `useMemo` für sortierte/gefilterte Listen prüfen. Wenn Profile sagt: Virtualisierung mit `@tanstack/react-virtual`.
-- **Search-Debounce**: Falls noch nicht vorhanden, 100-150ms Debounce in `useSearch`.
-- **Tauri-Roundtrips reduzieren**: Falls beim Gruppen-Wechsel immer ein `get_entries`-Call passiert — Caching im Frontend prüfen.
-- **Re-Renders**: `React.memo` auf `EntryListItem`, stabile Props per `useCallback`.
-- **Startup**: Next.js initial bundle prüfen (`next build` → Bundle-Analyzer). Framer Motion ist tendenziell schwer; bei Bedarf einzelne Animationen ohne ersetzen.
-- **Rust-Seite**: Wenn `get_entries` für 500 Einträge spürbar ist, prüfen ob unnötiges Cloning passiert. `kdbx/database.rs` und `kdbx/entry.rs` checken.
+`server/src/storage.rs` — drei Tabellen:
 
-### 2.3 Was NICHT machen
-- Keine spekulativen Refactorings ohne Messung.
-- Keine globalen State-Libs (Zustand/Redux) "weil schneller" — der React-State-Ansatz funktioniert für diese App-Größe.
-- KDF-Parameter NICHT schwächen, um Öffnen zu beschleunigen.
+```sql
+users         (id, email, server_auth_hash, kdf_salt_b64,
+               wrapped_master_key_b64, recovery_blob_b64,
+               account_pubkey_b64, wrapped_account_privkey_b64, created_at)
+vaults        (id, name, owner_user_id, ciphertext_b64, etag,
+               created_at, updated_at)
+vault_members (vault_id, user_id, role, wrapped_vault_key_b64,
+               invited_at, accepted_at)
+```
+
+`server/src/main.rs` + `vault.rs` + `auth.rs` exponieren:
+
+| Method | Path                                  | Auth   | Notes |
+|--------|---------------------------------------|--------|-------|
+| POST   | `/auth/signup`                        | none   | Generates first vault inline |
+| POST   | `/auth/login`                         | none   | Returns kdf_salt + wrapped_master_key + wrapped_account_privkey |
+| POST   | `/auth/kdf-params`                    | none   | Public — anyone can fetch salt |
+| POST   | `/auth/recovery-init`                 | none   | Returns recovery_blob for a given email |
+| POST   | `/auth/reset`                         | none   | Swap credentials after recovery |
+| POST   | `/users/lookup`                       | Bearer | Resolve email → user_id + account_pubkey |
+| GET    | `/vaults`                             | Bearer | List caller's vaults |
+| POST   | `/vaults`                             | Bearer | Create new vault |
+| GET    | `/vaults/{id}`                        | Bearer | Single vault + caller's wrapped key |
+| PUT    | `/vaults/{id}`                        | Bearer | CAS update via expected_etag |
+| PATCH  | `/vaults/{id}`                        | Bearer | Rename (owner) |
+| DELETE | `/vaults/{id}`                        | Bearer | Delete (owner) |
+| POST   | `/vaults/{id}/share`                  | Bearer | Add/update member with sealed key |
+| DELETE | `/vaults/{id}/share`                  | Bearer | Revoke member |
+| GET    | `/vaults/{id}/members`                | Bearer | List members + roles |
+| PATCH  | `/vaults/{id}/members/{user_id}`      | Bearer | Change a member's role (owner) |
+
+Zero-config Boot: `JWT_SECRET` + `DB_PATH` auto-generieren beim ersten Start, persistieren im OS data dir. Per-IP-Rate-Limit auf `/auth/*` via `tower_governor` (5 burst, 1 token / 6s) mit `SmartIpKeyExtractor` für Caddy-Setup.
+
+### Stage B — Client Multi-Vault + Cloud-Login auf Unlock-Screen
+
+`src-tauri/src/cloud/` — neuer Modul-Baum:
+
+```
+cloud/
+├── crypto.rs    Argon2id KDF, AES-GCM wrap/unwrap, sealed-box (NaCl-style)
+├── client.rs    Typed reqwest wrapper für alle Endpoints
+└── session.rs   CloudSession + ActiveVault state
+```
+
+Wrapped-master-key Architektur:
+
+```
+master_password
+    │ Argon2id (m=64MiB, t=3, p=4, client-side)
+    ▼
+password_key (32B, used only to wrap/unwrap master_key)
+    │
+    ▼
+master_key (random at signup, never derived) ──┐
+    │                                          │
+    ├─ SHA256(··· || "auth")  ──► server_auth_hash
+    │
+    ├─ SHA256(··· || "vault") ──► vault_key (random) ──► AES-GCM(kdbx_bytes)
+    │
+    └─ X25519 keypair ──► account_pubkey (server-side, shareable)
+                          account_privkey (wrapped under master_key)
+```
+
+`src/routes/UnlockScreen.svelte` bekommt einen Tab-Switcher *Local file / Cloud account*. `CloudUnlockTab.svelte` lädt Vault-Picker nach Login, KDBX-PW pro Vault via Modal (kein `window.prompt`-Hijack mehr).
+
+### Stage C — Vault Sharing mit E2E Key Wrap
+
+Curve25519-Keypair pro Account, beim Signup generiert. Sealed-Box (hand-rolled über `crypto_box::ChaChaBox` weil 0.9 keine top-level `seal()` mehr exportiert) wrapt den `vault_key` für jeden Empfänger einzeln. Server speichert nur die opaken Blobs.
+
+`POST /vaults/{id}/share` nimmt `{recipient_user_id, wrapped_vault_key_b64, role}` — server-side validiert dass Caller `Owner` ist. Beim Empfänger-Login wird das wrapped vault_key via `sealed_open` mit dem eigenen account-keypair entschlüsselt.
+
+### Stage D — Permission Levels (Owner / Editor / Reader)
+
+Server enforced:
+- **Owner**: CRUD, share/unshare, role-change, rename, delete vault
+- **Editor**: read + PUT vault
+- **Reader**: nur read
+
+Client gates:
+- `appState.cloudVaultRole` + `isReadOnly` getter
+- `Sidebar.svelte` + `VaultSwitcher.svelte` zeigen "RO"-Badge
+- `MainApp.handleNewEntry` / `handleSave` early-return mit Toast wenn read-only
+- `VaultMembersDialog.svelte` — Owner-only Role-Dropdown + Revoke + Invite
+
+### Stage E — Web Dashboard (`dashboard/`)
+
+Vanilla Svelte 5 + Vite + Tailwind v4 SPA. Selbe oklch Indigo-Violett-Palette wie die Desktop-App. `hash-wasm` für browser-seitiges Argon2id; Web Crypto API für AES-GCM unwrap. Aktuell: Login, Vault-Listing, Rename/Delete für Owner. Servierbar als statische Files via Caddy (handle-path `/dashboard/*` im Caddyfile).
+
+### Stage F — Cloud-only Mode (✅ shipped, Bonus)
+
+Auf Wunsch nachgeschoben: Cloud-Vaults landen **nicht** mehr als Datei auf Disk.
+
+- `Database.path` ist jetzt `Option<PathBuf>` — `None` = cloud-only
+- `Database::open_from_bytes` + `save_to_bytes` + `create_in_memory` neue APIs ohne FS-Touch
+- `cloud_open_vault(vault_id, kdbx_password)` lädt direkt in `state.database`
+- Save-Pfad: in cloud-mode → `save_to_bytes` + `cloud_push`, kein `fs::write`
+- File-Watcher + lockfile in cloud-mode aus (kein File da)
+- App-Close = Bytes weg, Server ist Source of Truth
+
+Plus Vault-Switcher: Dropdown im Sidebar-Header, KDBX-PWs werden pro Session gecached (`appState.vaultPasswords`) damit Switch-back nicht erneut promptet.
+
+### Hello-Integration für Cloud
+
+`hello.rs` erweitert um `hello_cloud_{store,retrieve,clear,is_enrolled}`. Bundle ist opaque JSON:
+
+```json
+{
+  "server_url": "...",
+  "email": "...",
+  "cloud_password": "...",
+  "default_vault_id": "...",
+  "vault_passwords": { "vault_id": "kdbx_pw", ... }
+}
+```
+
+Hello-Prompt → entschlüssele Bundle → `cloud_login` + alle Vault-PWs in Session-Cache laden + default-Vault öffnen. User landet mit **einem Tap** in seinem Vault. Bundle wird beim erstmaligen Login mit `Remember Me` angeboten, oder manuell im Vault-Picker via "Enable one-tap unlock with Windows Hello"-Button.
+
+### Remember Me Auto-Rehydrate
+
+`cloud_persist_session` schreibt Master-Key + Token in den Windows Credential Manager unter einem well-known `DEFAULT_TARGET`. `cloud_rehydrate_session` wird beim App-Start (`Shell.svelte init()`) gerufen — wenn Session da, springt Unlock-Screen direkt zum Cloud-Tab mit pre-fetched Vault-Liste und Highlight auf der zuletzt geöffneten Vault.
+
+### Recovery Codes
+
+20-Zeichen Crockford-Base32 (16 random bytes, ohne 0/O/I/L). Beim Signup einmal angezeigt. Argon2id-Salt = `SHA256("recovery:" || email)` damit der Code allein zur Recovery reicht. `cloud_recover(email, code, new_password)` wrappt `master_key` mit neuem `password_key` und überschreibt server-side via `/auth/reset`.
 
 ---
 
-## Phase 3 — Browser Extension (Chrome + Edge + Firefox)
+## Phase 6 — UI Polish + Fixes (⏭️ nächste Session)
 
-Eigenständiges Subprojekt. Schätzung: 1-2 Wochen für solides MVP.
+Was funktioniert, was noch schöner werden muss:
 
-### 3.1 Architektur-Entscheidung: Wie kommuniziert die Extension mit der Desktop-App?
+### Bekannte Lücken aus Phase 5
 
-Drei Optionen:
+1. **Per-control disable im Reader-Mode** — Top-level Handler (`handleNewEntry`, `handleSave`) blocken Writes, aber die Buttons in `EntryList`, `EntryEditor`, `GroupTree` sind noch klickbar und geben dann erst den Toast. Sauberer: alle Edit-Affordances visuell disabled when `appState.isReadOnly`.
+2. **Recovery-Code-Anzeige nach Signup** — kommt aktuell nur als Toast/Console-Log durch. Braucht einen eigenen Modal mit "Copy" + "Download as .txt" + "Print" + großem Warning-Banner ("Save this NOW, you won't see it again").
+3. **Conflict-Dialog Politur** — die Per-Entry-Diff-View funktioniert aber sieht funktional aus, könnte mit Field-Labels + Color-Coded-Diff polished werden.
+4. **Sync-Pill Animationen** — momentan harte Zustandswechsel. Smoother Cross-Fade zwischen `Saving` → `Syncing cloud` → `Synced` wäre nett.
+5. **Dashboard Native Dialogs** — Rename/Delete nutzen aktuell `window.prompt`/`window.confirm`. Sollten richtige Dialoge sein (analog zum Desktop).
+6. **Members-Dialog** — Layout passt, aber "Invite" Form-Feedback ist minimal. Plus: Pending invitations (accepted_at == null) hervorheben.
+7. **Settings → Cloud Sync** Layout — könnte aufgeräumter werden mit echten Sections + Icons.
+8. **VaultSwitcher** — beim öffnen ist die Liste momentan einen Tick spät da (race zwischen onMount-loadList und open-event). Funktioniert aber leichter Flicker.
+9. **CloudUnlockTab Phase Picker** — wenn user den Back-Button drückt, wird die Form geleert; sollte den Username im Field behalten.
+10. **Empty-state des Dashboards** — wenn 0 Vaults, sieht's leer aus. Empty-State-Card mit Call-to-Action ("Create your first vault in the desktop app").
 
-**Option A — KeePassXC-Browser-Protokoll (empfohlen)**
-- Open-Standard, von KeePassXC etabliert. Native Messaging via Browser-Host-Binary.
-- Verschlüsselter Channel mit libsodium (curve25519 key exchange).
-- Vorteil: Bestehende Browser-Extensions (`KeePassXC-Browser`) funktionieren potenziell out of the box, wenn unser Backend das Protokoll implementiert.
-- Nachteil: Komplexes Protokoll, libsodium-Binding nötig.
+### Production-Hardening (für später)
 
-**Option B — Lokaler HTTP-Server in der App**
-- Tauri-App startet einen HTTP-Server auf `127.0.0.1:<random-port>` mit Token-Auth.
-- Extension fragt den Port via Native-Messaging-Host oder festen Range ab.
-- Vorteil: Einfacher zu debuggen.
-- Nachteil: Firewall-Prompts, Port-Konflikte, weniger sicher gegen lokale Prozesse.
+- **Recovery-Code regenerieren** — UI um alten Code zu invalidieren und neuen zu drucken
+- **Cloud-Account löschen** — `DELETE /auth/account` plus Confirmation-Dialog
+- **Cloud-Account-PW ändern** mit altem PW als Proof (statt nur via Recovery)
+- **Audit-Log** — `audit_log` Tabelle, `GET /audit?since=...` Endpoint, Viewer im Dashboard
+- **2FA am Cloud-Account selbst** — TOTP-Setup, separat vom KDBX-Yubikey
+- **Account-PW-Strength-Meter** auf der Signup-Seite
+- **Push-Notifications für Vault-Änderungen** — WebSocket statt poll-on-focus
+- **CI** für `server/` + `dashboard/` (Docker-Build, e2e API-Tests)
+- **Linux Hello-Äquivalent** (libsecret / Keychain auf macOS)
 
-**Option C — Native Messaging direkt**
-- Browser ruft ein kleines Host-Binary auf (per stdin/stdout), das mit der Haupt-App per IPC redet.
-- Vorteil: Browser-Standard, kein offener Port.
-- Nachteil: Host-Binary registrieren in `HKCU\Software\Google\Chrome\NativeMessagingHosts\...` — komplex bei Installation/Update.
+### Mobile
 
-**Vorschlag**: Option A. Das macht uns automatisch kompatibel mit KeePassXC-Browser-Extension; eigene Extension kann später folgen.
-
-### 3.2 Extension Features (MVP)
-- Auto-Fill in Login-Formularen (Username + Password).
-- Save-Prompt nach erfolgreichem Login auf neuer Seite ("Diesen Login speichern?").
-- Suche im Extension-Popup, Klick → fill or copy.
-- Password-Generator im Popup.
-- TOTP-Codes anzeigen/kopieren (falls Eintrag ein `otp:` Feld hat).
-- HTTP Basic Auth Handling.
-
-### 3.3 Wichtige Designentscheidungen
-- **DB muss in der App unlocked sein**, Extension lockt nicht selbst. Wenn locked → Extension zeigt "App entsperren" + öffnet Hauptfenster.
-- **Per-Site-Approval**: Erste Anfrage einer Domain muss in der App bestätigt werden ("Soll example.com auf Logins zugreifen?"). Wird pro DB-Eintrag gespeichert.
-- **TLS für Communication-Channel**: Auch lokal, weil lokaler Browser bei einigen Browsern keine `http://localhost` ohne Weiteres erlaubt.
-
-### 3.4 Schritte
-1. Manifest V3 Boilerplate (TypeScript + Vite).
-2. Native-Messaging-Host-Binary (kleines Rust-Crate in `extension-host/`).
-3. Tauri-Plugin oder Command-Handler für die KeePassXC-Protokoll-Implementierung.
-4. Popup-UI mit derselben shadcn/ui-Optik wie die App.
-5. Veröffentlichung: Chrome Web Store ($5 einmalig), Edge Add-ons (kostenlos), Firefox AMO (kostenlos).
+Tauri 2.0 unterstützt iOS und Android. Mit dem Cloud-Server in Place und Multi-Vault macht eine Read-Mostly-Mobile-App jetzt Sinn. Eigene Session, danach.
 
 ---
 
-## Phase 4 — Sync via Cloud-Ordner (WebDAV/Dropbox/Nextcloud)
+## Code-Layout-Karte
 
-Pragmatischer Sync ohne eigenen Server. KeePassXC-Modell.
-
-### 4.1 Grundannahme
-DB-Datei liegt in einem User-verwalteten Sync-Ordner (Dropbox, OneDrive, Nextcloud, Syncthing, Google Drive Desktop). Sync passiert auf Datei-Ebene durch den Cloud-Client. **Unsere App muss nur**:
-1. Externe Änderungen erkennen (File-Watcher).
-2. Eigene Änderungen schreiben, ohne fremde Änderungen zu überschreiben → Merge.
-
-### 4.2 Was schon da ist
-- `lib/storage.ts` hat `liveUpdates` per DB.
-- Es gibt `merge_database` und `check_database_changes` Commands (in `commands/database.rs`). Erste Implementierung scheint zu existieren — Tiefe prüfen.
-
-### 4.3 Was fehlt (vermutlich)
-- **Robuster File-Watcher**: `notify` crate in Rust, der bei Modifikation der DB-Datei automatisch `check_database_changes` triggert.
-- **Konflikt-UI**: Wenn Merge nicht clean ist (gleicher Eintrag, beide Seiten geändert) → Dialog "Conflict in Eintrag X — Behalten: lokal / remote / neu kombinieren".
-- **Lock-Datei-Awareness**: Vor Schreibvorgang `<db>.lock` erzeugen (wie KeePass es macht), prüfen ob fremder Lock existiert (anderes Gerät schreibt gerade).
-- **Native WebDAV-Support (optional)**: Für User ohne Cloud-Sync-Client — App kann direkt mit WebDAV-Server reden. `reqwest` ist schon Dependency. Niedrige Priorität, da Dropbox/OneDrive Desktop-Clients der 99%-Use-Case sind.
-
-### 4.4 Empfohlene Reihenfolge
-1. File-Watcher → automatisches Reload bei externer Änderung.
-2. Konflikt-Handling-UI verbessern.
-3. Status-Indicator: "Synchronisiert vor 5 Sek" / "Konflikt — bitte lösen".
-4. Optional: WebDAV-Client direkt im Backend.
-
-### 4.5 Nicht-Ziele
-- **Kein eigener Sync-Server**. Wenn das später kommt, ist es Phase 5.
-- **Keine Cloud-Account-Integration in der App** (Dropbox OAuth etc.). User soll Cloud-Client separat installieren.
-
----
-
-## Phase 5 (optional, weit weg) — Eigener Sync-Server
-
-Nur wenn Phase 4 nicht reicht und du wirklich 1Password-Style willst. Massiver Aufwand:
-- Server-Komponente (Rust, Axum?) mit End-to-End-Verschlüsselung.
-- Account-System.
-- Hosting + Monitoring + Backups.
-- ToS, Datenschutzerklärung, evtl. Auftragsverarbeitungsverträge.
-- Mobile-Apps (iOS, Android) werden dann fast erzwungen, sonst macht der Server wenig Sinn.
-
-**Empfehlung**: Erst Phase 1-4 abschließen und 6 Monate live testen, bevor das überhaupt angedacht wird.
-
----
-
-## Mobile (nicht in Roadmap, aber relevant)
-
-Tauri 2.0 unterstützt iOS und Android. Nach Phase 4 (Sync funktioniert) könnte eine Read-Only-Mobile-App mit demselben Codebase sinnvoll sein — das ist der natürliche Pfad. Vor Phase 4 macht Mobile keinen Sinn, weil sonst nichts zum Synchronisieren da ist.
-
----
-
-## Was als nächstes konkret zu tun ist
-
-Nach deiner Freigabe von Phase 1 wäre die Implementierungsreihenfolge:
-1. Close-to-Tray Default flippen + Migration (~30 min).
-2. Autostart-Plugin integrieren + Settings-Toggle + Installer-Hook (~3 h).
-3. Signing-Keys generieren + GitHub Actions Release-Workflow + Updater-Plugin (~4 h).
-4. Manuell mit einem 1.0.1-Test-Release verifizieren, dass Update-Flow läuft.
-
-Dann Phase 2 (Profiling). Dann Phase 3 (Extension). Dann Phase 4 (Sync).
+| Pfad | Was |
+|------|-----|
+| `src/lib/components/Sidebar.svelte` | Vault-Header (mit RO-Badge), GroupTree, Nav |
+| `src/lib/components/VaultSwitcher.svelte` | Dropdown im Header für Cloud-Vault-Switch + Create |
+| `src/lib/components/VaultMembersDialog.svelte` | Member-Liste mit Rollen-Dropdown, Invite, Revoke |
+| `src/lib/components/CloudUnlockTab.svelte` | Login / Picker / Hello-Unlock / Hello-Enroll |
+| `src/lib/components/ConflictResolutionDialog.svelte` | Per-Eintrag Sync-Konflikt-UI |
+| `src/lib/components/DatabaseConflictDialog.svelte` | Fallback Sync/Overwrite/Cancel |
+| `src/lib/app-state.svelte.ts` | Globaler reaktiver State (Phase, Cloud-Session, Vault-PW-Cache, isReadOnly) |
+| `src-tauri/src/cloud/` | Cloud crypto + HTTP client + Session-State |
+| `src-tauri/src/commands/cloud.rs` | Tauri-Commands für signup / login / push / pull / switch / share / members |
+| `src-tauri/src/commands/cloud_persistence.rs` | Windows Credential Manager Persistierung der Cloud-Session |
+| `src-tauri/src/commands/hello.rs` | Hello für lokale kdbx + neu für Cloud-Bundle |
+| `src-tauri/src/commands/database.rs` | open/save/merge/conflict + notify-Watcher install |
+| `src-tauri/src/kdbx/database.rs` | KDBX-Layer mit Option<path> für cloud-only |
+| `src-tauri/src/lockfile.rs` | `<db>.kdbx.lock` mit Stale-Detection |
+| `server/src/storage.rs` | SQLite users + vaults + vault_members |
+| `server/src/auth.rs` | Signup / Login / Recovery / Reset / Lookup |
+| `server/src/vault.rs` | Vault CRUD + Share + Members |
+| `dashboard/src/App.svelte` | Web-Admin-SPA (Login + Vault-Listing) |
